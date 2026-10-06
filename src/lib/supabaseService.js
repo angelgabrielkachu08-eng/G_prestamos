@@ -93,6 +93,7 @@ export async function cargarCarteraCompleta(userId) {
             *,
             prestamo:prestamos (
               referencia,
+              origen,
               cliente:clientes ( nombre_completo, telefono )
             )
           )
@@ -171,7 +172,7 @@ export async function cargarCarteraCompleta(userId) {
   const payments = quotaResult.data
     .filter((q) => q.estado !== 'pagada' && !clientes.get(loanMap.get(q.prestamo_id)?.cliente_id)?.eliminado)
     .map((q) => {
-      const loan = loanMap.get(q.prestamo_id)
+      const loan = loanMap.get(q.prestamo_id) ?? loanHistoryMap.get(q.prestamo_id)
       const client = clientes.get(loan?.cliente_id)
       const remaining = Math.max(0, Number(q.monto) - Number(q.monto_pagado ?? 0))
       const balanceRatio = Number(q.monto) > 0 ? remaining / Number(q.monto) : 0
@@ -194,6 +195,7 @@ export async function cargarCarteraCompleta(userId) {
               : 'Pendiente',
         n: q.numero,
         totalQuotas: loan?.cantidad_cuotas ?? 0,
+        origen: loan?.origen ?? 'efectivo',
       }
     })
 
@@ -821,14 +823,17 @@ export async function cargarVentas(userId) {
         id, cantidad, precio_unitario, subtotal,
         producto:productos ( id, nombre, categoria )
       ),
-      prestamo:prestamos ( id, referencia, estado, cantidad_cuotas, monto_cuota )
+      prestamo:prestamos ( id, referencia, estado, origen, cantidad_cuotas, monto_cuota )
     `)
     .eq('owner_id', userId)
     .order('created_at', { ascending: false })
 
   if (error) throw new Error(error.message)
 
-  return data.map(v => ({
+  return data.map(v => {
+    // La relación ventas→préstamos es 1:N en PostgREST y puede llegar como arreglo.
+    const prestamoRow = Array.isArray(v.prestamo) ? v.prestamo[0] : v.prestamo
+    return {
     id:              v.id,
     referencia:      v.referencia,
     clienteId:       v.cliente?.id ?? '',
@@ -849,15 +854,17 @@ export async function cargarVentas(userId) {
       precioUnitario: Number(d.precio_unitario),
       subtotal:       Number(d.subtotal),
     })),
-    prestamo:        v.prestamo ? {
-      id:           v.prestamo.id,
-      referencia:   v.prestamo.referencia,
-      estado:       v.prestamo.estado,
-      cuotas:       v.prestamo.cantidad_cuotas,
-      montoCuota:   Number(v.prestamo.monto_cuota),
+    prestamo:        prestamoRow ? {
+      id:           prestamoRow.id,
+      referencia:   prestamoRow.referencia,
+      estado:       prestamoRow.estado,
+      origen:       prestamoRow.origen ?? 'venta',
+      cuotas:       Number(prestamoRow.cantidad_cuotas) || 0,
+      montoCuota:   Number(prestamoRow.monto_cuota) || 0,
     } : null,
     createdAt:       v.created_at,
-  }))
+    }
+  })
 }
 
 /**

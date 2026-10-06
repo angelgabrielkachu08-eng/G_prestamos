@@ -1090,6 +1090,8 @@ export default function App() {
   const [toast, setToast]                 = useState(null)
   const [mobileOpen, setMobileOpen]       = useState(false)
   const [dataError, setDataError]         = useState(null)
+  const [legalSection, setLegalSection]   = useState(null)
+  const paymentLocks = useRef(new Set())
 
   /* ── Toasts ── */
   const showToast = useCallback((message, kind = 'success') => setToast({ message, kind }), [])
@@ -1206,6 +1208,8 @@ export default function App() {
     if (status !== 'Pagado' && status !== 'Parcial') return
     const importeNum = Number(amount)
     if (!Number.isFinite(importeNum) || importeNum <= 0) { showToast('El importe debe ser mayor a cero.', 'error'); return }
+    if (paymentLocks.current.has(payment.id)) return
+    paymentLocks.current.add(payment.id)
     try {
       const pago = await registrarPago(payment, importeNum)
       if ('vibrate' in navigator) navigator.vibrate(status === 'Pagado' ? [24,30,24] : 18)
@@ -1232,6 +1236,7 @@ export default function App() {
       setAllLoans((prev) => prev.map(advanceLoan))
       showToast(finalStatus === 'Pagado' ? `✓ Pago registrado · Recibo ${pago.referencia}` : 'Pago parcial registrado')
     } catch (err) { showToast(`No se pudo registrar: ${err.message}`, 'error') }
+    finally { paymentLocks.current.delete(payment.id) }
   }
 
   const handleCreateLoan = async (form) => {
@@ -1541,10 +1546,10 @@ export default function App() {
       <p>Conectando…</p>
     </div>
   )
-  if (isSupabaseConfigured && !user) return <Login onSignIn={handleSignIn} />
+  if (isSupabaseConfigured && !user) return <><Login onSignIn={handleSignIn} onOpenLegal={setLegalSection}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
   /* ── Selector de modo (primera pantalla tras login) ── */
-  if (!modo) return <ModeSelector onSelect={elegirModo} />
+  if (!modo) return <><ModeSelector onSelect={elegirModo} onOpenLegal={setLegalSection}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
   const rutaCount    = paymentsEfectivo.filter((p) => daysUntil(p.due) === 0 && (p.status === 'Pendiente' || p.status === 'Parcial')).length
 
@@ -1666,6 +1671,11 @@ export default function App() {
         <footer className="footer">
           <span>© 2026 Prestaneo Finance OS</span>
           <span><i/> Cifrado de extremo a extremo</span>
+          <div className="legal-footer-links">
+            <button type="button" onClick={() => setLegalSection('terms')}>Términos</button>
+            <button type="button" onClick={() => setLegalSection('privacy')}>Privacidad</button>
+            <button type="button" onClick={() => setLegalSection('cookies')}>Cookies</button>
+          </div>
           <button onClick={() => showToast('Prestaneo · Centro de ayuda', 'info')}>Ayuda <ArrowUpRight size={13}/></button>
         </footer>
       </main>
@@ -1718,6 +1728,9 @@ export default function App() {
       </AnimatePresence>
       <AnimatePresence>
         {toast && <Toast message={toast.message} kind={toast.kind} onDismiss={dismissToast} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}
       </AnimatePresence>
     </div>
   )
@@ -4031,11 +4044,15 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
   const totalCuotas = Number(loanStats?.installments ?? venta.prestamo?.cuotas ?? cuotasVenta[0]?.totalQuotas ?? 0)
   const cuotasPagadas = Math.min(totalCuotas, Number(loanStats?.paid) || 0)
   const progreso = totalCuotas > 0 ? Math.round((cuotasPagadas / totalCuotas) * 100) : 0
-  const estadoVenta = progreso === 100 || venta.estado === 'pagado' ? 'Pagado' : vencidas > 0 ? 'En mora' : 'Activo'
+  const planValido = totalCuotas > 0
+  const todasPagadas = planValido && cuotasPagadas >= totalCuotas && pendientes.length === 0
+  const estadoVenta = planValido
+    ? todasPagadas || venta.estado === 'pagado' ? 'Pagado' : vencidas > 0 ? 'En mora' : 'Activo'
+    : Number(venta.montoFinanciado) > 0 ? 'Revisar cuotas' : 'Pagado'
 
   return (
     <div className={`vc-acordeon ${open ? 'vc-acordeon-open' : ''}`}>
-      <button className="vc-acordeon-head" onClick={() => setOpen(o => !o)}>
+      <button type="button" className="vc-acordeon-head" aria-expanded={open} onClick={() => setOpen(o => !o)}>
         <div className="vc-acordeon-left">
           <span className="origen-badge origen-venta"><ShoppingCart size={10}/> {venta.referencia}</span>
           <p className="vc-items-label">{(venta.items ?? []).map(it => `${it.cantidad}× ${it.nombre}`).join(', ')}</p>
@@ -4043,7 +4060,7 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
         <div className="vc-acordeon-mid">
           <span><small>Total</small><b><Money value={venta.montoTotal}/></b></span>
           <span><small>Anticipo</small><b className="text-green"><Money value={venta.anticipo}/></b></span>
-          <span><small>Cuotas</small><b>{cuotasPagadas}/{totalCuotas || cuotasVenta.length}</b></span>
+          <span><small>Cuotas</small><b>{planValido ? `${cuotasPagadas}/${totalCuotas}` : Number(venta.montoFinanciado) > 0 ? 'Revisar plan' : 'Contado'}</b></span>
         </div>
         <div className="vc-acordeon-right">
           <Status status={estadoVenta}/>
@@ -4074,13 +4091,13 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
                 <div><small>Precio total contado</small><b><Money value={venta.montoTotal}/></b></div>
                 <div><small>Anticipo pagado</small><b className="text-green"><Money value={venta.anticipo}/></b></div>
                 <div><small>Monto financiado</small><b className="text-purple"><Money value={venta.montoFinanciado}/></b></div>
-                {venta.prestamo && <div><small>Cuota</small><b><Money value={venta.prestamo.montoCuota}/> × {venta.prestamo.cuotas}</b></div>}
+                {venta.prestamo && planValido && <div><small>Cuota</small><b><Money value={venta.prestamo.montoCuota}/> × {totalCuotas}</b></div>}
                 {venta.notas && <div className="vc-notas"><small>Notas:</small> <span>{venta.notas}</span></div>}
               </div>
-              <div className="vc-progreso-wrap">
-                <div className="vc-progreso-label"><span>Cuotas cobradas</span><span>{cuotasPagadas}/{totalCuotas || 0} · {progreso}%</span></div>
+              {planValido && <div className="vc-progreso-wrap">
+                <div className="vc-progreso-label"><span>Cuotas cobradas</span><span>{cuotasPagadas}/{totalCuotas} · {progreso}%</span></div>
                 <div className="vc-progreso-bar"><div className="vc-progreso-fill" style={{ width:`${progreso}%` }}/></div>
-              </div>
+              </div>}
               <button type="button" className="vc-export-btn" onClick={() => onExportSale?.(venta)}><FileText size={14}/> Descargar comprobante Word de esta compra</button>
             </div>
 
@@ -4110,7 +4127,9 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
                       </button>
                       {expandedQuota === p.id && (
                         <div id={`venta-quota-actions-${p.id}`} className="vc-cuota-actions-panel">
-                          <button type="button" className="vc-cobrar-btn" onClick={() => onPay?.(p, 'Pagado')}><Check size={14}/> Cobrar completa</button>
+                          <button type="button" className="vc-cobrar-btn" onClick={() => {
+                            if (window.confirm(`¿Confirmás el cobro de ${fmt(p.amount)} de la cuota ${p.n}? La ficha abierta no cobra cuotas.`)) onPay?.(p, 'Pagado')
+                          }}><Check size={14}/> Cobrar completa</button>
                           <button type="button" className="vc-parcial-btn" onClick={() => onPartial?.(p)}><HandCoins size={14}/> Cobrar por partes</button>
                           {sanitizePhone(p.phone || venta.phone) ? (
                             <a className="vc-whatsapp-btn" href={`https://wa.me/${sanitizePhone(p.phone || venta.phone)}?text=${encodeURIComponent(`Hola ${(p.client || venta.client || 'cliente').split(' ')[0]}, te recordamos que la cuota ${p.n} de tu compra ${venta.referencia} vence el ${p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'próximamente'}. Importe pendiente: $${Number(p.amount || 0).toLocaleString('es-AR')}. Si ya abonaste, podés ignorar este mensaje.`)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/> Avisar por WhatsApp</a>
@@ -4122,8 +4141,14 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
                   })}
                 </div>
               </div>
-            ) : (
+            ) : todasPagadas ? (
               <div className="vc-all-paid"><CheckCheck size={18} className="icon-green"/><span>Todas las cuotas cobradas</span></div>
+            ) : !planValido && Number(venta.montoFinanciado) > 0 ? (
+              <div className="vc-quota-warning"><AlertTriangle size={17}/><span>No encontramos el plan ni las cuotas de esta venta. No se registró ningún cobro al abrir la ficha.</span></div>
+            ) : planValido ? (
+              <div className="vc-quota-warning"><AlertTriangle size={17}/><span>No hay cuotas pendientes visibles, pero el progreso indica {cuotasPagadas}/{totalCuotas}. Revisá el historial antes de confirmar un cobro.</span></div>
+            ) : (
+              <div className="vc-all-paid"><CheckCheck size={18} className="icon-green"/><span>Venta sin saldo financiado</span></div>
             )}
           </motion.div>
         )}
@@ -4491,7 +4516,7 @@ function RefinanciarModal({ loan, onClose, onCreate }) {
 /* ═══════════════════════════════════════════════════════════
    MODE SELECTOR — Cyberpunk Split Screen
 ════════════════════════════════════════════════════════════ */
-function ModeSelector({ onSelect }) {
+function ModeSelector({ onSelect, onOpenLegal }) {
   const [hovered, setHovered] = useState(null)
 
   const modes = [
@@ -4623,6 +4648,7 @@ function ModeSelector({ onSelect }) {
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .8 }}>
         Podés cambiar de módulo en cualquier momento desde el menú lateral
       </motion.p>
+      <LegalLinks onOpen={onOpenLegal}/>
     </div>
   )
 }
@@ -4631,7 +4657,7 @@ function ModeSelector({ onSelect }) {
 /* ═══════════════════════════════════════════════════════════
    LOGIN — neon (lv2)
 ════════════════════════════════════════════════════════════ */
-function Login({ onSignIn }) {
+function Login({ onSignIn, onOpenLegal }) {
   const [reduced, setReduced] = useState(false)
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState('')
@@ -4733,8 +4759,86 @@ function Login({ onSignIn }) {
             {reduced ? 'Activar animaciones' : 'Reducir animaciones'}
           </button>
         </div>
+        <LegalLinks onOpen={onOpenLegal}/>
       </motion.div>
     </div>
+  )
+}
+
+const LEGAL_SECTIONS = {
+  terms: {
+    label: 'Términos', title: 'Términos de uso',
+    sections: [
+      ['Alcance', 'PrestaNeo es una herramienta privada de gestión para registrar operaciones, clientes, productos, cuotas y caja. No es una entidad financiera, no capta depósitos, no otorga crédito por cuenta propia ni reemplaza el contrato que corresponda entre quien vende o presta y su cliente.'],
+      ['Uso responsable', 'La persona que administra la cuenta es responsable de la exactitud de los datos ingresados, de verificar importes y vencimientos antes de confirmar una operación y de contar con las autorizaciones necesarias para cargar datos de terceros. Los reportes son auxiliares y deben cotejarse con los comprobantes originales.'],
+      ['Cobros y acuerdos', 'Una cuota solo se registra como pagada cuando el operador confirma expresamente el cobro mediante la acción correspondiente. Abrir una ficha, ver un cliente o expandir una compra no registra pagos. Los términos de cada operación deben informarse y documentarse por separado de forma clara y conforme a la normativa aplicable.'],
+      ['Crédito para consumo', 'La información y los reportes de esta aplicación no son por sí solos un contrato de crédito al consumo. Cuando corresponda, el documento de la operación debe incluir de forma clara los datos exigidos por el artículo 36 de la Ley 24.240, entre ellos precio de contado, anticipo y monto financiado, tasa efectiva anual, intereses o costo financiero total, sistema de amortización, cantidad/frecuencia/importe de pagos y cargos adicionales. La tasa total ingresada en la aplicación no sustituye automáticamente esos datos.'],
+      ['Disponibilidad y seguridad', 'Se aplican controles de acceso y medidas razonables para proteger la cuenta. El servicio puede requerir mantenimiento o depender de proveedores externos de autenticación, base de datos y alojamiento. Conservá comprobantes fuera de la aplicación y no compartas tus credenciales.'],
+      ['Derechos de consumidores', 'Estos términos no limitan derechos irrenunciables reconocidos por la normativa argentina. Cuando una operación concreta constituya una relación de consumo o una contratación a distancia, rigen las protecciones legales aplicables y la información particular de esa operación.'],
+      ['Responsable y contacto', 'Responsable/operador: [COMPLETAR NOMBRE O RAZÓN SOCIAL]. Domicilio: [COMPLETAR DOMICILIO LEGAL]. Atención y reclamos: 3765004174. Estos campos deben completarse antes de publicar la aplicación para terceros.'],
+    ],
+  },
+  privacy: {
+    label: 'Privacidad', title: 'Política de privacidad',
+    sections: [
+      ['Quién trata los datos', 'El operador identificado en estos términos administra la cuenta y determina para qué utiliza los datos de sus clientes. PrestaNeo funciona como herramienta de gestión. La identidad legal y el domicilio del responsable están pendientes de completar por el operador: [COMPLETAR NOMBRE/RAZÓN SOCIAL Y DOMICILIO].'],
+      ['Datos y finalidades', 'La aplicación puede tratar datos de acceso (correo y perfil de Google), datos que el operador carga sobre clientes (nombre, teléfono, DNI, domicilio), productos, ventas, préstamos, cuotas, pagos, reportes y movimientos de caja. Se usan para autenticar al operador, administrar las operaciones, emitir comprobantes y responder consultas o reclamos. No se utilizan para publicidad comportamental.'],
+      ['Proveedores y almacenamiento', 'La autenticación usa Google y los datos de la aplicación se almacenan en Supabase, según la configuración del proyecto. El proveedor de alojamiento de la versión publicada también puede procesar datos técnicos de conexión. Estos proveedores pueden alojar o procesar información en otras jurisdicciones; el operador debe verificar región, contratos y medidas de transferencia antes de producción. No se venden datos personales.'],
+      ['Conservación y seguridad', 'Los datos se conservan mientras sean necesarios para gestionar la cuenta y las operaciones, y por los plazos legales o contractuales que correspondan. Se aplican controles de acceso por usuario y medidas técnicas razonables. Ningún sistema conectado a Internet puede garantizar riesgo cero.'],
+      ['Derechos de las personas', 'Podés solicitar acceso, rectificación, actualización o supresión de tus datos y consultar su finalidad y destinatarios. Contactá al responsable por WhatsApp o teléfono al 3765004174 e indicá qué derecho querés ejercer; se podrá pedir información razonable para verificar identidad. La supresión puede tener límites cuando deban conservarse datos por obligaciones legales o derechos de terceros.'],
+      ['Autoridad de control', 'La Agencia de Acceso a la Información Pública (AAIP) es el organismo de control de la Ley 25.326. Podés consultar sus canales y los derechos reconocidos por la ley en los enlaces oficiales incluidos al pie.'],
+      ['Contacto del responsable', 'Nombre/razón social y domicilio: [COMPLETAR ANTES DE PUBLICAR]. Teléfono de atención y reclamos: 3765004174.'],
+    ],
+  },
+  cookies: {
+    label: 'Cookies', title: 'Cookies y almacenamiento local',
+    sections: [
+      ['Uso actual', 'La aplicación no incorpora actualmente herramientas propias de publicidad ni analítica de seguimiento. Guarda preferencias funcionales en el almacenamiento local del navegador (por ejemplo, el último módulo elegido) y utiliza almacenamiento del navegador para mantener la sesión de Supabase. El flujo de acceso con Google puede usar cookies propias de Google.'],
+      ['Para qué sirven', 'Estos elementos permiten iniciar sesión, mantener la seguridad y recordar preferencias. Si se bloquean o se borran, algunas funciones —como conservar la sesión— pueden dejar de funcionar y quizá debas volver a ingresar.'],
+      ['Cómo gestionarlas', 'Podés borrar o bloquear cookies y datos del sitio desde los ajustes del navegador. No se instalarán cookies publicitarias sin actualizar previamente esta política y la configuración correspondiente.'],
+      ['Contacto', 'Consultas sobre privacidad o almacenamiento: 3765004174. Responsable: [COMPLETAR NOMBRE/RAZÓN SOCIAL Y DOMICILIO].'],
+    ],
+  },
+}
+
+function LegalLinks({ onOpen }) {
+  return (
+    <nav className="legal-links" aria-label="Información legal">
+      {Object.entries(LEGAL_SECTIONS).map(([key, item]) => (
+        <button type="button" key={key} onClick={() => onOpen?.(key)}>{item.label}</button>
+      ))}
+      <a href="https://wa.me/5493765004174?text=Hola%2C%20necesito%20atenci%C3%B3n%20o%20quiero%20realizar%20un%20reclamo." target="_blank" rel="noreferrer">Atención y reclamos</a>
+    </nav>
+  )
+}
+
+function LegalDialog({ section = 'terms', onClose }) {
+  const [active, setActive] = useState(section)
+  useEffect(() => {
+    const closeOnEscape = event => { if (event.key === 'Escape') onClose?.() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+  const content = LEGAL_SECTIONS[active] ?? LEGAL_SECTIONS.terms
+  return (
+    <motion.div className="legal-overlay" role="presentation" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onMouseDown={event => { if (event.target === event.currentTarget) onClose?.() }}>
+      <motion.section className="legal-dialog" role="dialog" aria-modal="true" aria-labelledby="legal-title" initial={{ opacity:0, y:18, scale:.98 }} animate={{ opacity:1, y:0, scale:1 }} exit={{ opacity:0, y:10, scale:.98 }}>
+        <header className="legal-dialog-head">
+          <div><span className="legal-eyebrow"><ShieldCheck size={13}/> INFORMACIÓN LEGAL · ARGENTINA</span><h2 id="legal-title">{content.title}</h2></div>
+          <button type="button" className="pn-btn-icon" onClick={onClose} aria-label="Cerrar información legal"><X size={17}/></button>
+        </header>
+        <div className="legal-tabs" role="tablist" aria-label="Políticas">
+          {Object.entries(LEGAL_SECTIONS).map(([key, item]) => <button type="button" role="tab" aria-selected={active === key} className={active === key ? 'legal-tab-active' : ''} key={key} onClick={() => setActive(key)}>{item.label}</button>)}
+        </div>
+        <div className="legal-content">
+          <div className="legal-notice"><AlertTriangle size={15}/><span>Documento inicial: completá nombre o razón social y domicilio del responsable antes de publicar la aplicación a clientes.</span></div>
+          {content.sections.map(([heading, text]) => <section key={heading}><h3>{heading}</h3><p>{text}</p></section>)}
+          {active === 'privacy' && <section><h3>Normativa y autoridad</h3><p><a href="https://www.argentina.gob.ar/normativa/nacional/64790/actualizacion" target="_blank" rel="noreferrer">Ley 25.326 de Protección de Datos Personales</a> · <a href="https://www.argentina.gob.ar/aaip/datospersonales/derechos" target="_blank" rel="noreferrer">Derechos ante la AAIP</a></p></section>}
+          {active === 'terms' && <section><h3>Normativa de referencia</h3><p><a href="https://www.argentina.gob.ar/normativa/nacional/638/actualizacion" target="_blank" rel="noreferrer">Ley 24.240 de Defensa del Consumidor</a> · <a href="https://www.argentina.gob.ar/normativa/nacional/ley-26994-235975/actualizacion" target="_blank" rel="noreferrer">Código Civil y Comercial de la Nación</a></p></section>}
+          <p className="legal-updated">Versión inicial · 6 de octubre de 2026 · Atención: <a href="tel:+543765004174">3765004174</a></p>
+        </div>
+      </motion.section>
+    </motion.div>
   )
 }
 
