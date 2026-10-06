@@ -375,10 +375,17 @@ export async function exportReportDocxPrestamos({ loans = [], payments = [], led
    REPORTE DE VENTAS
    opts: { ventas, ledger, titulo }
 ═══════════════════════════════════════════════════════════ */
-export async function exportReportDocxVentas({ ventas = [], ledger = [], titulo = 'Reporte de Ventas' }) {
+export async function exportReportDocxVentas({ ventas = [], ledger = [], loans = [], payments = [], titulo = 'Reporte de Ventas' }) {
   const totalVendido  = ventas.reduce((s, v) => s + Number(v.montoTotal),    0)
   const totalAnticipo = ventas.reduce((s, v) => s + Number(v.anticipo),      0)
-  const totalFinanc   = ventas.reduce((s, v) => s + Number(v.montoFinanciado), 0)
+  const saldoPorCobrar = payments.filter(p => p.origen === 'venta').reduce((s,p) => s + Number(p.amount || 0), 0)
+  const totalCobradoCuotas = ventas.reduce((sum,v) => {
+    const referencia = v.prestamo?.referencia
+    const loan = loans.find(l => l.id === referencia)
+    const ledgerTotal = ledger.filter(m => m.type === 'Entrada' && referencia && m.label?.includes(referencia)).reduce((s,m) => s + Number(m.amount || 0), 0)
+    return sum + Math.max(Number(loan?.totalRecuperado || 0), ledgerTotal)
+  }, 0)
+  const totalCobrado = totalAnticipo + totalCobradoCuotas
   const cajaSaldo     = ledger.reduce((s, m) => s + (m.type === 'Entrada' ? m.amount : -m.amount), 0)
 
   // Agrupar por cliente para el reporte
@@ -400,7 +407,13 @@ export async function exportReportDocxVentas({ ventas = [], ledger = [], titulo 
   const clienteSections = clientes.flatMap(c => {
     const totalC    = c.ventas.reduce((s, v) => s + Number(v.montoTotal), 0)
     const anticipoC = c.ventas.reduce((s, v) => s + Number(v.anticipo),   0)
-    const financC   = c.ventas.reduce((s, v) => s + Number(v.montoFinanciado), 0)
+    const cobradoCuotasC = c.ventas.reduce((sum,v) => {
+      const referencia = v.prestamo?.referencia
+      const loan = loans.find(l => l.id === referencia)
+      const ledgerTotal = ledger.filter(m => m.type === 'Entrada' && referencia && m.label?.includes(referencia)).reduce((s,m) => s + Number(m.amount || 0), 0)
+      return sum + Math.max(Number(loan?.totalRecuperado || 0), ledgerTotal)
+    }, 0)
+    const saldoC = c.ventas.reduce((sum,v) => sum + payments.filter(p => p.loanId === v.prestamo?.referencia).reduce((s,p) => s + Number(p.amount || 0), 0), 0)
 
     return [
       heading2(`Cliente: ${c.client}`, P.purpleL),
@@ -409,12 +422,18 @@ export async function exportReportDocxVentas({ ventas = [], ledger = [], titulo 
       ], { after: 100 }),
       kpiRow([
         { label: 'Total comprado',   value: money(totalC),    color: P.purpleL },
-        { label: 'Anticipo pagado',  value: money(anticipoC), color: P.greenL  },
-        { label: 'Saldo financiado', value: money(financC),   color: P.amber  },
+        { label: 'Total cobrado',    value: money(anticipoC + cobradoCuotasC), color: P.greenL },
+        { label: 'Saldo pendiente',  value: money(saldoC), color: P.amber },
       ]),
       spacer(100),
       ...c.ventas.flatMap(v => {
         const items = (v.items ?? [])
+        const loan = loans.find(l => l.id === v.prestamo?.referencia)
+        const totalCuotas = Number(loan?.installments ?? v.prestamo?.cuotas ?? 0)
+        const cuotaPendiente = payments.filter(p => p.loanId === v.prestamo?.referencia).reduce((s,p) => s + Number(p.amount || 0), 0)
+        const ledgerCuotas = ledger.filter(m => m.type === 'Entrada' && v.prestamo?.referencia && m.label?.includes(v.prestamo.referencia)).reduce((s,m) => s + Number(m.amount || 0), 0)
+        const cobradoCuotas = Math.max(Number(loan?.totalRecuperado || 0), ledgerCuotas)
+        const cuotasPagadas = Math.min(totalCuotas, Number(loan?.paid) || 0)
         return [
           para([
             run(`Venta ${v.referencia}`, { bold: true, color: P.purpleL, size: 20 }),
@@ -453,6 +472,18 @@ export async function exportReportDocxVentas({ ventas = [], ledger = [], titulo 
                 cell(`Cuota (${v.prestamo.cuotas} cuotas)`, { bold: true, color: P.muted, bg: P.bgAlt, width: 55 }),
                 cell(money(v.prestamo.montoCuota), { color: P.amber, bg: P.bgAlt }),
               ]})] : []),
+              ...(v.prestamo ? [new TableRow({ children: [
+                cell('Progreso de cuotas', { bold: true, color: P.muted, bg: P.bg, width: 55 }),
+                cell(`${cuotasPagadas}/${totalCuotas} cuotas`, { color: P.purpleL, bg: P.bg }),
+              ]})] : []),
+              ...(v.prestamo ? [new TableRow({ children: [
+                cell('Cobrado en cuotas', { bold: true, color: P.muted, bg: P.bgAlt, width: 55 }),
+                cell(money(cobradoCuotas), { color: P.greenL, bg: P.bgAlt }),
+              ]})] : []),
+              ...(v.prestamo ? [new TableRow({ children: [
+                cell('Saldo pendiente actual', { bold: true, color: P.muted, bg: P.bg, width: 55 }),
+                cell(money(cuotaPendiente), { color: P.amber, bg: P.bg }),
+              ]})] : []),
               ...(v.notas ? [new TableRow({ children: [
                 cell('Notas', { bold: true, color: P.muted, bg: P.bg, width: 55 }),
                 cell(v.notas, { color: P.muted, bg: P.bg }),
@@ -482,8 +513,8 @@ export async function exportReportDocxVentas({ ventas = [], ledger = [], titulo 
         heading2('Resumen de ventas', P.purple),
         kpiRow([
           { label: 'Total vendido',    value: money(totalVendido),  color: P.purpleL },
-          { label: 'Anticipos cobrados', value: money(totalAnticipo), color: P.greenL },
-          { label: 'Saldo financiado',  value: money(totalFinanc),   color: P.amber  },
+          { label: 'Total cobrado', value: money(totalCobrado), color: P.greenL },
+          { label: 'Saldo pendiente', value: money(saldoPorCobrar), color: P.amber },
           { label: 'Total clientes',    value: String(clientes.length), color: P.text },
         ]),
         spacer(200),

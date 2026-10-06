@@ -1276,6 +1276,22 @@ export default function App() {
         createdAt: new Date().toISOString(),
       }
       setVentas(prev => [nuevaVenta, ...prev])
+      setAllLoans(prev => [{
+        id: result.refPrestamo,
+        dbId: result.prestamoId,
+        clienteId: result.clienteId,
+        client: form.client,
+        phone: form.phone,
+        principal: Number(form.montoTotal) - Number(form.anticipo ?? 0),
+        rate: Number(form.rate),
+        installments: Number(form.installments),
+        paid: 0,
+        totalRecuperado: 0,
+        status: 'Activo',
+        next: form.schedule[0]?.fecha_vencimiento ?? form.firstDue,
+        createdAt: new Date().toISOString(),
+        origen: 'venta',
+      }, ...prev])
 
       // Descuentar stock localmente
       setProductos(prev => prev.map(p => {
@@ -1319,7 +1335,7 @@ export default function App() {
       }
 
       setModal(null)
-      setTab('ventas')
+      setTab('v_ventas')
       showToast(`Venta ${result.refVenta} registrada`)
     } catch (err) {
       showToast(`No se pudo registrar la venta: ${err.message}`, 'error')
@@ -1378,10 +1394,12 @@ export default function App() {
     try {
       if (origen === 'ventas') {
         const ventasCliente = ventas.filter(v => v.clienteId === cliente.clienteId)
-        const saleRefs = ventasCliente.map(v => v.referencia).filter(Boolean)
-        const ledgerCliente = ledgerVentas.filter(m => saleRefs.some(ref => m.label?.includes(ref)))
+        const refs = ventasCliente.flatMap(v => [v.referencia, v.prestamo?.referencia]).filter(Boolean)
+        const ledgerCliente = ledgerVentas.filter(m => refs.some(ref => m.label?.includes(ref)))
+        const loansCliente = allLoans.filter(l => ventasCliente.some(v => v.prestamo?.referencia === l.id))
+        const paymentsCliente = payments.filter(p => ventasCliente.some(v => v.prestamo?.referencia === p.loanId))
         const { exportReportDocxVentas } = await import('./utils/reportDocx')
-        await exportReportDocxVentas({ ventas: ventasCliente, ledger: ledgerCliente, titulo: `Ficha de ${cliente.client}` })
+        await exportReportDocxVentas({ ventas: ventasCliente, ledger: ledgerCliente, loans:loansCliente, payments:paymentsCliente, titulo: `Ficha de ${cliente.client}` })
       } else {
         const loansCliente = allLoansEfectivo.filter(l => l.clienteId === cliente.clienteId || l.client === cliente.client)
         const paysCliente = paymentsEfectivo.filter(p => p.client === cliente.client)
@@ -1391,6 +1409,18 @@ export default function App() {
         await exportReportDocxPrestamos({ loans: loansCliente, payments: paysCliente, ledger: ledgerCliente, titulo: `Ficha de ${cliente.client}` })
       }
       showToast('Reporte Word del cliente descargado')
+    } catch (err) { showToast(`No se pudo generar el Word: ${err.message}`, 'error') }
+  }
+
+  const handleExportVentaDocx = async (venta) => {
+    try {
+      const refs = [venta.referencia, venta.prestamo?.referencia].filter(Boolean)
+      const ledgerVenta = ledgerVentas.filter(m => refs.some(ref => m.label?.includes(ref)))
+      const loansVenta = allLoans.filter(l => l.id === venta.prestamo?.referencia)
+      const paymentsVenta = payments.filter(p => p.loanId === venta.prestamo?.referencia)
+      const { exportReportDocxVentas } = await import('./utils/reportDocx')
+      await exportReportDocxVentas({ ventas:[venta], ledger:ledgerVenta, loans:loansVenta, payments:paymentsVenta, titulo:`Comprobante de venta ${venta.referencia}` })
+      showToast('Reporte Word de la venta descargado')
     } catch (err) { showToast(`No se pudo generar el Word: ${err.message}`, 'error') }
   }
 
@@ -1608,11 +1638,11 @@ export default function App() {
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} mode="prestamos" payments={paymentsEfectivo} />}
 
               {/* ── MÓDULO VENTAS ── */}
-              {tab === 'v_inicio'   && <VentasInicio ventas={ventas} totals={totals} loading={loading} go={setTab} />}
+              {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} totals={totalsVentas} loading={loading} go={setTab} />}
               {tab === 'v_catalogo' && <Catalogo productos={productos} loading={loading} onCreate={handleCreateProduct} onUpdate={handleUpdateProduct} onDelete={handleDeleteProduct} />}
               {tab === 'v_nueva'    && <NuevaVenta productos={productos} onSubmit={handleCreateVenta} />}
-              {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} />}
-              {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
+              {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} />}
+              {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
               {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
 
             </motion.div>
@@ -3640,6 +3670,7 @@ function NuevaVenta({ productos = [], onSubmit }) {
   const [qProd,    setQProd]   = useState('')
 
   const subtotal   = useMemo(() => carrito.reduce((s,i) => s + i.producto.precioContado * i.qty, 0), [carrito])
+  const anticipoInvalido = anticipo !== '' && (Number(anticipo) < 0 || Number(anticipo) >= subtotal)
   const financiado = Math.max(0, subtotal - (Number(anticipo) || 0))
   const preview    = useMemo(() =>
     financiado > 0 ? calcularPrestamoDirecto(financiado, tasa, Number(cuotas), freq, firstDue, false) : null,
@@ -3669,6 +3700,7 @@ function NuevaVenta({ productos = [], onSubmit }) {
   async function handleSubmit() {
     if (!client.trim()) { setErr('El nombre del cliente es requerido'); return }
     if (carrito.length === 0) { setErr('Agregá al menos un producto al carrito'); return }
+    if (Number(anticipo) < 0 || Number(anticipo) >= subtotal) { setErr('El anticipo debe ser menor que el total de la compra para financiar el saldo.'); return }
     if (!preview) { setErr('El monto financiado debe ser mayor a cero'); return }
     setSaving(true)
     try {
@@ -3879,8 +3911,9 @@ function NuevaVenta({ productos = [], onSubmit }) {
                   <label className="lm-label">Anticipo inicial ($)</label>
                   <div className="lm-input-wrap">
                     <span className="lm-prefix">$</span>
-                    <input className="lm-input lm-input-prefix" value={anticipo} onChange={e => setAnticipo(e.target.value)} type="number" min="0" placeholder="0"/>
+                    <input className="lm-input lm-input-prefix" value={anticipo} onChange={e => setAnticipo(e.target.value)} type="number" min="0" max={subtotal} placeholder="0"/>
                   </div>
+                  {anticipoInvalido && <small className="nv-field-warning">El anticipo debe ser mayor o igual a $0 y menor que el total de la compra ({fmt(subtotal)}).</small>}
                 </div>
                 <div>
                   <label className="lm-label">Tasa de interés total</label>
@@ -3948,8 +3981,9 @@ function NuevaVenta({ productos = [], onSubmit }) {
 /* ═══════════════════════════════════════════════════════════════
    VENTA ACORDEON
 ═══════════════════════════════════════════════════════════════ */
-function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
+function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExportSale }) {
   const [open, setOpen] = useState(false)
+  const [expandedQuota, setExpandedQuota] = useState(null)
 
   const cuotasVenta = useMemo(() =>
     cuotas.filter(p => p.loanId === venta.prestamo?.referencia),
@@ -3957,10 +3991,11 @@ function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
   )
   const pendientes = cuotasVenta.filter(p => p.status !== 'Pagado' && Number(p.amount) > 0)
   const vencidas   = pendientes.filter(p => p.status === 'Vencido').length
-  const progreso   = cuotasVenta.length > 0
-    ? Math.round(((cuotasVenta.length - pendientes.length) / cuotasVenta.length) * 100)
-    : 0
-  const estadoVenta = venta.estado === 'pagado' ? 'Pagado' : vencidas > 0 ? 'En mora' : 'Activo'
+  const loanStats = loans.find(l => l.id === venta.prestamo?.referencia)
+  const totalCuotas = Number(loanStats?.installments ?? venta.prestamo?.cuotas ?? cuotasVenta[0]?.totalQuotas ?? 0)
+  const cuotasPagadas = Math.min(totalCuotas, Number(loanStats?.paid) || 0)
+  const progreso = totalCuotas > 0 ? Math.round((cuotasPagadas / totalCuotas) * 100) : 0
+  const estadoVenta = progreso === 100 || venta.estado === 'pagado' ? 'Pagado' : vencidas > 0 ? 'En mora' : 'Activo'
 
   return (
     <div className={`vc-acordeon ${open ? 'vc-acordeon-open' : ''}`}>
@@ -3972,7 +4007,7 @@ function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
         <div className="vc-acordeon-mid">
           <span><small>Total</small><b><Money value={venta.montoTotal}/></b></span>
           <span><small>Anticipo</small><b className="text-green"><Money value={venta.anticipo}/></b></span>
-          <span><small>Cuotas</small><b>{cuotasVenta.length - pendientes.length}/{cuotasVenta.length}</b></span>
+          <span><small>Cuotas</small><b>{cuotasPagadas}/{totalCuotas || cuotasVenta.length}</b></span>
         </div>
         <div className="vc-acordeon-right">
           <Status status={estadoVenta}/>
@@ -4007,9 +4042,10 @@ function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
                 {venta.notas && <div className="vc-notas"><small>Notas:</small> <span>{venta.notas}</span></div>}
               </div>
               <div className="vc-progreso-wrap">
-                <div className="vc-progreso-label"><span>Progreso de cobro</span><span>{progreso}%</span></div>
+                <div className="vc-progreso-label"><span>Cuotas cobradas</span><span>{cuotasPagadas}/{totalCuotas || 0} · {progreso}%</span></div>
                 <div className="vc-progreso-bar"><div className="vc-progreso-fill" style={{ width:`${progreso}%` }}/></div>
               </div>
+              <button type="button" className="vc-export-btn" onClick={() => onExportSale?.(venta)}><FileText size={14}/> Descargar comprobante Word de esta compra</button>
             </div>
 
             {pendientes.length > 0 ? (
@@ -4017,35 +4053,34 @@ function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
                 <div className="vc-cuotas-titulo"><HandCoins size={13}/> Cuotas pendientes</div>
                 <div className="vc-cuotas-lista">
                   {cuotasVenta.map(p => {
-                    const esPagada  = p.status === 'Pagado' || Number(p.amount) === 0
                     const esVencida = p.status === 'Vencido'
                     const esParcial = p.status === 'Parcial'
                     const dias = daysUntil(p.due)
                     return (
-                      <div key={p.id} className={`vc-cuota-row ${esPagada ? 'vc-cuota-pagada' : esVencida ? 'vc-cuota-vencida' : esParcial ? 'vc-cuota-parcial' : ''}`}>
+                      <div key={p.id} className="vc-cuota-item">
+                      <button type="button" className={`vc-cuota-row ${esVencida ? 'vc-cuota-vencida' : esParcial ? 'vc-cuota-parcial' : ''}`} aria-expanded={expandedQuota === p.id} aria-controls={`venta-quota-actions-${p.id}`} onClick={() => setExpandedQuota(expandedQuota === p.id ? null : p.id)}>
                         <div className="vc-cuota-num">
-                          {esPagada ? <CheckCheck size={14} className="icon-green"/> : esVencida ? <CircleAlert size={14} className="icon-red"/> : <Clock size={14} className="icon-dim"/>}
-                          <span>Cuota {p.n}</span>
+                          {esVencida ? <CircleAlert size={14} className="icon-red"/> : <Clock size={14} className="icon-dim"/>}
+                          <span>Cuota {p.n}/{p.totalQuotas || totalCuotas}</span>
                         </div>
                         <div className="vc-cuota-fecha">
-                          <span>{new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR', { day:'2-digit', month:'short' })}</span>
-                          {!esPagada && (
-                            <span className={`vc-dias-badge ${esVencida ? 'badge-red' : dias <= 2 ? 'badge-amber' : 'badge-dim'}`}>
-                              {esVencida ? `${Math.abs(dias)}d vencida` : dias === 0 ? 'Hoy' : `${dias}d`}
-                            </span>
-                          )}
+                          <span>{p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR', { day:'2-digit', month:'short', year:'numeric' }) : 'Sin vencimiento'}</span>
+                          <span className={`vc-dias-badge ${esVencida ? 'badge-red' : dias <= 2 ? 'badge-amber' : 'badge-dim'}`}>
+                            {esVencida ? `${Math.abs(dias)}d vencida` : dias === 0 ? 'Hoy' : `${dias}d`}
+                          </span>
                         </div>
                         <div className="vc-cuota-monto"><Money value={p.amount}/></div>
-                        {!esPagada && (
-                          <div className="vc-cuota-actions">
-                            <button className="vc-cobrar-btn" title="Cobrar cuota completa" onClick={() => onPay(p, 'Pagado')}>
-                              <Check size={13}/> Cobrar
-                            </button>
-                            <button className="vc-parcial-btn" title="Pago parcial" onClick={() => onPartial(p)}>
-                              <MoreHorizontal size={13}/>
-                            </button>
-                          </div>
-                        )}
+                        <ChevronDown size={15} className={`vc-chevron ${expandedQuota === p.id ? 'vc-chevron-open' : ''}`}/>
+                      </button>
+                      {expandedQuota === p.id && (
+                        <div id={`venta-quota-actions-${p.id}`} className="vc-cuota-actions-panel">
+                          <button type="button" className="vc-cobrar-btn" onClick={() => onPay?.(p, 'Pagado')}><Check size={14}/> Cobrar completa</button>
+                          <button type="button" className="vc-parcial-btn" onClick={() => onPartial?.(p)}><HandCoins size={14}/> Cobrar por partes</button>
+                          {sanitizePhone(p.phone || venta.phone) ? (
+                            <a className="vc-whatsapp-btn" href={`https://wa.me/${sanitizePhone(p.phone || venta.phone)}?text=${encodeURIComponent(`Hola ${(p.client || venta.client || 'cliente').split(' ')[0]}, te recordamos que la cuota ${p.n} de tu compra ${venta.referencia} vence el ${p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'próximamente'}. Importe pendiente: $${Number(p.amount || 0).toLocaleString('es-AR')}. Si ya abonaste, podés ignorar este mensaje.`)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/> Avisar por WhatsApp</a>
+                          ) : <span className="vc-no-phone"><Phone size={13}/> Agregá un teléfono a la ficha del cliente</span>}
+                        </div>
+                      )}
                       </div>
                     )
                   })}
@@ -4064,7 +4099,7 @@ function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
 /* ═══════════════════════════════════════════════════════════════
    VENTAS CLIENTES — lista de ventas agrupada por cliente
 ═══════════════════════════════════════════════════════════════ */
-function VentasClientes({ ventas = [], payments = [], loading = false, go, onPay, onPartial }) {
+function VentasClientes({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onExportSale }) {
   const [q,      setQ]      = useState('')
   const [filtro, setFiltro] = useState('Todos')
 
@@ -4081,18 +4116,20 @@ function VentasClientes({ ventas = [], payments = [], loading = false, go, onPay
         (filtro === 'Todos' || c.ventas.some(v => {
           const cuotasC = cuotasVenta.filter(p => p.loanId === v.prestamo?.referencia)
           const vencidas = cuotasC.filter(p => p.status === 'Vencido').length
-          const est = v.estado==='pagado'?'Pagado':vencidas>0?'En mora':'Activo'
+          const loan = loans.find(l => l.id === v.prestamo?.referencia)
+          const totalCuotas = Number(loan?.installments ?? v.prestamo?.cuotas ?? 0)
+          const est = (totalCuotas > 0 && Number(loan?.paid || 0) >= totalCuotas) || v.estado === 'pagado' ? 'Pagado' : vencidas > 0 ? 'En mora' : 'Activo'
           return est === filtro
         })))
       .sort((a,b) => a.client.localeCompare(b.client))
-  }, [ventas, q, filtro, cuotasVenta])
+  }, [ventas, loans, q, filtro, cuotasVenta])
 
   const kpis = useMemo(() => ({
     total:   ventas.reduce((s,v) => s+Number(v.montoTotal),    0),
-    anticipo:ventas.reduce((s,v) => s+Number(v.anticipo),      0),
+    cobrado: ventas.reduce((s,v) => s + Number(v.anticipo || 0) + Number(loans.find(l => l.id === v.prestamo?.referencia)?.totalRecuperado || 0), 0),
     pend:    cuotasVenta.filter(p=>p.status!=='Pagado'&&Number(p.amount)>0).reduce((s,p)=>s+Number(p.amount),0),
     clientes:new Set(ventas.map(v=>v.clienteId)).size,
-  }), [ventas, cuotasVenta])
+  }), [ventas, cuotasVenta, loans])
 
   return (
     <div className="pn-section">
@@ -4111,8 +4148,8 @@ function VentasClientes({ ventas = [], payments = [], loading = false, go, onPay
       <div className="pn-kpi-row">
         {[
           { label:'Total vendido',    value:kpis.total,    icon:ShoppingCart, color:'purple' },
-          { label:'Anticipo cobrado', value:kpis.anticipo, icon:Check,        color:'green'  },
-          { label:'Saldo pendiente',  value:kpis.pend,     icon:Clock,        color:'amber'  },
+          { label:'Total cobrado',    value:kpis.cobrado,  icon:Check,        color:'green'  },
+          { label:'Saldo por cobrar', value:kpis.pend,     icon:Clock,        color:'amber'  },
           { label:'Clientes',         value:kpis.clientes, icon:Users,        color:'teal', isMoney:false },
         ].map((k,i) => (
           <motion.div key={k.label} className={`pn-kpi pn-kpi-${k.color}`}
@@ -4164,7 +4201,7 @@ function VentasClientes({ ventas = [], payments = [], loading = false, go, onPay
                   </div>
                 </div>
                 <div className="vc-ventas-del-cliente">
-                  {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} onPay={onPay} onPartial={onPartial}/>)}
+                  {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} loans={loans} onPay={onPay} onPartial={onPartial} onExportSale={onExportSale}/>)}
                 </div>
               </motion.div>
             )
@@ -4178,7 +4215,7 @@ function VentasClientes({ ventas = [], payments = [], loading = false, go, onPay
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES VENTAS — grid de tarjetas de clientes de ventas
 ═══════════════════════════════════════════════════════════════ */
-function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay, onPartial, onExportClient }) {
+function ClientesVentas({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onExportClient, onExportSale }) {
   const [q,        setQ]      = useState('')
   const [selected, setSelected] = useState(null)
 
@@ -4205,7 +4242,7 @@ function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay
     const cuotasC    = cuotasVenta.filter(p => c.ventas.some(v=>v.prestamo?.referencia===p.loanId))
     const deudaTotal = cuotasC.filter(p=>p.status!=='Pagado'&&Number(p.amount)>0).reduce((s,p)=>s+Number(p.amount),0)
     const totalComp  = c.ventas.reduce((s,v)=>s+Number(v.montoTotal),0)
-    const totalAnt   = c.ventas.reduce((s,v)=>s+Number(v.anticipo),0)
+    const totalCobrado = c.ventas.reduce((sum,v) => sum + Number(v.anticipo) + Number(loans.find(l => l.id === v.prestamo?.referencia)?.totalRecuperado || 0), 0)
     return (
       <div className="pn-section">
         <button className="pn-back-btn" onClick={()=>setSelected(null)}>
@@ -4231,14 +4268,14 @@ function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay
         </div>
         <div className="pn-ficha-strip">
           <div><small>Total comprado</small><b><Money value={totalComp}/></b></div>
-          <div><small>Anticipo cobrado</small><b className="text-green"><Money value={totalAnt}/></b></div>
+          <div><small>Total cobrado</small><b className="text-green"><Money value={totalCobrado}/></b></div>
           <div><small>Saldo pendiente</small><b className="text-red"><Money value={deudaTotal}/></b></div>
           <div><small>Compras</small><b>{c.ventas.length}</b></div>
         </div>
         <div className="pn-panel" style={{padding:0,overflow:'hidden'}}>
           <div className="pn-panel-header"><span className="pn-panel-title"><ShoppingCart size={14}/> Compras a crédito</span></div>
           <div style={{padding:'8px 14px 14px'}}>
-            {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} onPay={onPay} onPartial={onPartial}/>)}
+            {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} loans={loans} onPay={onPay} onPartial={onPartial} onExportSale={onExportSale}/>)}
           </div>
         </div>
       </div>
@@ -4275,6 +4312,12 @@ function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay
                 const pendTotal = cuotasC.filter(p=>p.status!=='Pagado'&&Number(p.amount)>0).reduce((s,p)=>s+Number(p.amount),0)
                 const tieneVencidas = cuotasC.some(p=>p.status==='Vencido')
                 const totalComp = c.ventas.reduce((s,v)=>s+Number(v.montoTotal),0)
+                const totalCuotas = c.ventas.reduce((s,v) => s + Number(loans.find(l => l.id === v.prestamo?.referencia)?.installments ?? v.prestamo?.cuotas ?? 0), 0)
+                const pagadas = c.ventas.reduce((s,v) => {
+                  const loan = loans.find(l => l.id === v.prestamo?.referencia)
+                  return s + Math.min(Number(loan?.installments ?? v.prestamo?.cuotas ?? 0), Number(loan?.paid || 0))
+                }, 0)
+                const avance = totalCuotas > 0 ? Math.round(pagadas / totalCuotas * 100) : 0
                 return (
                   <motion.article key={c.clienteId} className="pn-client-card"
                     initial={{ opacity:0, y:18 }} animate={{ opacity:1, y:0 }}
@@ -4293,6 +4336,10 @@ function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay
                       <div><small>Total</small><b><Money value={totalComp}/></b></div>
                     </div>
                     {pendTotal>0 && <div className="pn-client-debt"><Money value={pendTotal}/> pendiente</div>}
+                    <div className="vc-client-progress">
+                      <div><span>Cuotas cobradas</span><b>{pagadas}/{totalCuotas} · {avance}%</b></div>
+                      <div className="vc-client-progress-bar"><span style={{ width:`${avance}%` }}/></div>
+                    </div>
                     <div className="pn-client-actions">
                       <button className="pn-btn-outline pn-btn-sm" style={{flex:1}} onClick={()=>setSelected(c)}>
                         <FileText size={12}/> Ver ficha
@@ -4567,7 +4614,7 @@ function Login({ onSignIn }) {
   ]
 
   return (
-    <div className="lv2-root">
+    <div className={`lv2-root ${reduced ? 'lv2-reduced' : ''}`}>
       {/* Background orbs */}
       {!reduced && orbs.map((o, i) => (
         <motion.div key={i} className={o.cls} style={o.style}
@@ -5128,16 +5175,17 @@ function PrestamosInicio({ totals = {}, loans = [], payments = [], monthBars = [
   )
 }
 
-function VentasInicio({ ventas = [], totals = {}, loading = false, go }) {
+function VentasInicio({ ventas = [], payments = [], loans = [], totals = {}, loading = false, go }) {
   const totalVendido  = ventas.reduce((s,v) => s+Number(v.montoTotal),      0)
-  const totalAnticipo = ventas.reduce((s,v) => s+Number(v.anticipo),        0)
-  const totalFinanc   = ventas.reduce((s,v) => s+Number(v.montoFinanciado), 0)
+  const cuotasVenta = payments.filter(p => p.origen === 'venta')
+  const saldoPorCobrar = cuotasVenta.reduce((s,p) => s + Number(p.amount || 0), 0)
+  const totalCobrado = ventas.reduce((s,v) => s + Number(v.anticipo || 0) + Number(loans.find(l => l.id === v.prestamo?.referencia)?.totalRecuperado || 0), 0)
 
   const kpis = [
-    { label:'Total vendido',    value:totalVendido,      icon:ShoppingCart, color:'purple' },
-    { label:'Anticipo cobrado', value:totalAnticipo,     icon:Check,        color:'green'  },
-    { label:'Financiado activo',value:totalFinanc,       icon:Clock,        color:'amber'  },
-    { label:'Caja ventas',      value:totals.caja || 0, icon:Wallet,       color:'teal'   },
+    { label:'Total vendido', value:totalVendido, icon:ShoppingCart, color:'purple' },
+    { label:'Total cobrado', value:totalCobrado, icon:Check, color:'green' },
+    { label:'Saldo por cobrar', value:saldoPorCobrar, icon:Clock, color:'amber' },
+    { label:'Caja ventas', value:totals.caja || 0, icon:Wallet, color:'teal' },
   ]
   const quick = [
     { label:'Nueva venta',icon:ShoppingCart,tab:'v_nueva',   desc:'Registrar venta' },
@@ -5187,15 +5235,21 @@ function VentasInicio({ ventas = [], totals = {}, loading = false, go }) {
             <table className="pn-table">
               <thead><tr><th>CLIENTE</th><th>REFERENCIA</th><th>TOTAL</th><th>ANTICIPO</th><th>ESTADO</th></tr></thead>
               <tbody>
-                {ventas.slice(0,6).map((v,i) => (
-                  <motion.tr key={v.id} initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:.4+i*.04 }}>
-                    <td className="pn-td-main">{v.client}</td>
-                    <td className="mono pn-td-muted">{v.referencia}</td>
-                    <td className="pn-td-money"><Money value={v.montoTotal}/></td>
-                    <td className="pn-td-green"><Money value={v.anticipo}/></td>
-                    <td><Status status={v.estado==='activo'?'Activo':v.estado==='pagado'?'Pagado':'Cancelado'}/></td>
-                  </motion.tr>
-                ))}
+                {ventas.slice(0,6).map((v,i) => {
+                  const loan = loans.find(l => l.id === v.prestamo?.referencia)
+                  const cuotasTotales = Number(loan?.installments ?? v.prestamo?.cuotas ?? 0)
+                  const vencida = payments.some(p => p.loanId === v.prestamo?.referencia && p.status === 'Vencido')
+                  const estado = v.estado === 'cancelado' ? 'Cancelado' : cuotasTotales > 0 && Number(loan?.paid || 0) >= cuotasTotales ? 'Pagado' : vencida ? 'En mora' : 'Activo'
+                  return (
+                    <motion.tr key={v.id} initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:.4+i*.04 }}>
+                      <td className="pn-td-main">{v.client}</td>
+                      <td className="mono pn-td-muted">{v.referencia}</td>
+                      <td className="pn-td-money"><Money value={v.montoTotal}/></td>
+                      <td className="pn-td-green"><Money value={v.anticipo}/></td>
+                      <td><Status status={estado}/></td>
+                    </motion.tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
