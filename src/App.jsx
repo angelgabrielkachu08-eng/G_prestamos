@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -1591,7 +1591,7 @@ export default function App() {
               {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={handlePay} />}
               {tab === 'p_nuevo'    && <LoanModal inline onClose={() => setTab('p_inicio')} onCreate={handleCreateLoan} userId={user?.id} />}
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} loading={loading} onPay={handlePay} onPartial={setPartialTarget} />}
-              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} payments={paymentsEfectivo} />}
+              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={handlePay} onPartial={setPartialTarget} payments={paymentsEfectivo} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} mode="prestamos" payments={paymentsEfectivo} />}
 
@@ -4646,9 +4646,10 @@ function Login({ onSignIn }) {
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES PRESTAMOS
 ═══════════════════════════════════════════════════════════════ */
-function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, payments = [] }) {
+function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, payments = [] }) {
   const [q,        setQ]   = useState('')
   const [selected, setSel] = useState(null)
+  const [expandedInstallment, setExpandedInstallment] = useState(null)
 
   const calcScore = useCallback((clientName) => {
     const cl = (allLoans.length > 0 ? allLoans : loans).filter(l => l.client === clientName)
@@ -4761,25 +4762,29 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                     const vencida = dias < 0 || p.status === 'Vencido'
                     const esHoy   = dias === 0
                     return (
-                      <div key={p.id} className={`ficha-cuota-row ${vencida ? 'ficha-cuota-vencida' : esHoy ? 'ficha-cuota-hoy' : ''}`}>
+                      <div key={p.id} className="ficha-cuota-item">
+                      <button type="button" className={`ficha-cuota-row ${vencida ? 'ficha-cuota-vencida' : esHoy ? 'ficha-cuota-hoy' : ''}`} aria-expanded={expandedInstallment === p.id} aria-controls={`cuota-actions-${p.id}`} onClick={() => setExpandedInstallment(expandedInstallment === p.id ? null : p.id)}>
                         <div className="ficha-cuota-info">
                           <span className="ficha-cuota-n">Cuota {p.n}/{p.totalQuotas}</span>
-                          <span className="ficha-cuota-date">{p.due}</span>
+                          <span className="ficha-cuota-date">{p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'Sin vencimiento'}</span>
                           {vencida && <span className="pn-badge-red">{Math.abs(dias)}d vencida</span>}
                           {esHoy && !vencida && <span className="pn-badge-amber">Hoy</span>}
                           {p.status === 'Parcial' && <span className="pn-badge-purple">Parcial</span>}
                         </div>
                         <div className="ficha-cuota-right">
                           <span className={`ficha-cuota-amt ${vencida ? 'text-red' : ''}`}><Money value={p.amount}/></span>
-                          <div style={{ display:'flex', gap:5 }}>
-                            <motion.button className="pn-cobrar-mini"
-                              onClick={() => {/* handled by parent via PartialModal or direct pay */}}
-                              style={{ display:'none' }}  /* placeholder */
-                              whileHover={{ scale:1.1 }} whileTap={{ scale:.9 }}>
-                              <Check size={12}/>
-                            </motion.button>
-                          </div>
+                          <ChevronDown size={16} className={`ficha-cuota-chevron ${expandedInstallment === p.id ? 'is-open' : ''}`}/>
                         </div>
+                      </button>
+                      {expandedInstallment === p.id && (
+                        <div id={`cuota-actions-${p.id}`} className="ficha-cuota-actions">
+                          <button type="button" className="ficha-action-pay" onClick={() => onPay?.(p, 'Pagado')}><Check size={15}/> Cobrar completa</button>
+                          <button type="button" className="ficha-action-partial" onClick={() => onPartial?.(p)}><HandCoins size={15}/> Cobrar por partes</button>
+                          {sanitizePhone(p.phone || selected.phone) ? (
+                            <a className="ficha-action-whatsapp" href={`https://wa.me/${sanitizePhone(p.phone || selected.phone)}?text=${encodeURIComponent(`Hola ${selected.client.split(' ')[0]}, te recordamos que la cuota ${p.n} de tu préstamo vence el ${p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'próximamente'}. Importe pendiente: $${Number(p.amount || 0).toLocaleString('es-AR')}. Si ya abonaste, podés ignorar este mensaje.`)}`} target="_blank" rel="noreferrer"><MessageCircle size={15}/> Avisar por WhatsApp</a>
+                          ) : <span className="ficha-action-no-phone"><Phone size={14}/> Agregá un teléfono para enviar el aviso</span>}
+                        </div>
+                      )}
                       </div>
                     )
                   })}

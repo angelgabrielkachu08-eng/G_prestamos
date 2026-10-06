@@ -5256,10 +5256,12 @@ tbody tr:hover { background: rgba(179,71,255,.06) }
 .ficha-cuota-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,.04);
-  transition: background .12s;
+  transition: background .18s, box-shadow .18s, color .18s;
+  width: 100%; text-align: left; color: inherit; font: inherit; cursor: pointer;
+  background: transparent; border-top: 0; border-left: 0; border-right: 0;
 }
-.ficha-cuota-row:last-child { border-bottom: none; }
-.ficha-cuota-row:hover { background: rgba(255,255,255,.04); }
+.ficha-cuota-row:hover,.ficha-cuota-row[aria-expanded="true"] { background: rgba(179,71,255,.07); box-shadow: inset 3px 0 #b347ff; }
+.ficha-cuota-row:focus-visible { outline: 2px solid #00ff87; outline-offset: -2px; }
 .ficha-cuota-vencida { background: rgba(255,77,109,.04) !important; }
 .ficha-cuota-hoy     { background: rgba(251,191,36,.03) !important; }
 .ficha-cuota-info { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; }
@@ -5267,6 +5269,17 @@ tbody tr:hover { background: rgba(179,71,255,.06) }
 .ficha-cuota-date { font-size: 11px; color: #818591; }
 .ficha-cuota-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .ficha-cuota-amt  { font-size: 14px; font-weight: 700; color: #f4f2f8; }
+.ficha-cuota-chevron { color:#9992a8; transition:transform .2s,color .2s; }
+.ficha-cuota-chevron.is-open { transform:rotate(180deg); color:#00ff87; }
+.ficha-cuota-actions { display:flex; flex-wrap:wrap; align-items:center; gap:9px; padding:12px 14px 14px; background:linear-gradient(100deg,rgba(0,255,135,.045),rgba(179,71,255,.075)); border-bottom:1px solid rgba(179,71,255,.18); animation:fichaActionsIn .2s ease-out both; }
+@keyframes fichaActionsIn { from { opacity:0; transform:translateY(-5px) } to { opacity:1; transform:translateY(0) } }
+.ficha-cuota-actions button,.ficha-cuota-actions a { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 13px; border-radius:11px; color:#f5f2fa; font-family:inherit; font-size:12px; font-weight:600; text-decoration:none; cursor:pointer; transition:transform .16s,box-shadow .16s,border-color .16s; }
+.ficha-cuota-actions button:hover,.ficha-cuota-actions a:hover { transform:translateY(-1px); }
+.ficha-action-pay { border:1px solid rgba(0,255,135,.45); background:rgba(0,255,135,.11); box-shadow:0 0 18px rgba(0,255,135,.08); }
+.ficha-action-pay:hover { box-shadow:0 0 20px rgba(0,255,135,.2); }
+.ficha-action-partial { border:1px solid rgba(179,71,255,.45); background:rgba(179,71,255,.13); }
+.ficha-action-whatsapp { border:1px solid rgba(37,211,102,.42); background:rgba(37,211,102,.1); }
+.ficha-action-no-phone { display:inline-flex; align-items:center; gap:7px; color:#a8a3b1; font-size:12px; }
 
 /* Responsivo */
 @media (max-width: 640px) {
@@ -5277,6 +5290,8 @@ tbody tr:hover { background: rgba(179,71,255,.06) }
 }
 @media (max-width: 480px) {
   .nv-prod-grid    { grid-template-columns: 1fr; }
+  .ficha-cuota-actions { align-items:stretch; }
+  .ficha-cuota-actions button,.ficha-cuota-actions a { flex:1 1 100%; }
 }
 
 
