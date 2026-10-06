@@ -227,7 +227,7 @@ export async function cargarCarteraCompleta(userId) {
     // Fallback: detectar por prefijo del concepto (CV- = crédito venta).
     origen: m.venta_id != null
       ? 'venta'
-      : m.concepto?.includes('CV-') || m.concepto?.includes('Anticipo venta')
+      : m.concepto?.includes('CV-') || m.concepto?.startsWith('Anticipo venta')
         ? 'venta'
         : 'efectivo',
     }
