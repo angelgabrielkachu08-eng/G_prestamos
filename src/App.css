@@ -5678,6 +5678,54 @@ select:focus-visible { outline:2px solid rgba(0,255,135,.65); outline-offset:2px
 .pn-void-cash-copy { margin:0 0 17px;color:#b7bbc6;font-size:13px;line-height:1.65; }
 .pn-void-cash-copy b { color:#f2eff8; }
 .pn-void-cash-reason { width:100%;min-height:96px;padding:12px;resize:vertical;color:#f2eff8;background:#15131e;border:1px solid rgba(199,133,255,.24);border-radius:11px; }
+
+/* Preferencia persistente para reducir efectos visuales y trabajo de GPU. */
+.performance-mode-toggle {
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:7px 10px;
+  border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(255,255,255,.025);
+  color:#a5a5b2;font:600 10px var(--body);cursor:pointer;white-space:nowrap;
+}
+.performance-mode-toggle svg { flex:none;color:#a78bfa; }
+.performance-mode-toggle small { padding:3px 6px;border-radius:999px;background:rgba(255,255,255,.06);color:#9293a1;font-size:9px; }
+.performance-mode-toggle.is-active { border-color:rgba(0,255,135,.25);background:rgba(0,255,135,.055);color:#d4f7e7; }
+.performance-mode-toggle.is-active svg,.performance-mode-toggle.is-active small { color:#00e994; }
+.performance-mode-toggle.is-active small { background:rgba(0,255,135,.1); }
+.performance-mode-toggle:hover { border-color:rgba(167,139,250,.35);color:#f0eafd; }
+.performance-mode-toggle:focus-visible { outline:2px solid #a78bfa;outline-offset:3px; }
+.sidebar-bottom > .performance-mode-toggle { width:100%;justify-content:flex-start;margin-bottom:9px;min-height:40px;padding-inline:11px; }
+.sidebar-bottom > .performance-mode-toggle span { flex:1;text-align:left; }
+.performance-mode-floating { position:absolute;z-index:10;top:max(16px,env(safe-area-inset-top));right:max(18px,env(safe-area-inset-right));box-shadow:0 8px 28px rgba(0,0,0,.25); }
+.login-performance-toggle { padding:3px 0;border:0;background:none;color:#818391;font-size:10px; }
+.login-performance-toggle small { display:inline;padding:0;background:none;color:#777887;font-size:9px; }
+.login-performance-toggle.is-active small { background:none;color:#00e994; }
+.login-performance-toggle:hover { border-color:transparent;background:none;color:#d6d1e1; }
+.lv2-root .performance-mode-toggle.is-active { color:#b8f2d4; }
+
+/* Menos resplandor en el acceso sin alterar los colores de la marca. */
+.lv2-root { background:radial-gradient(ellipse at 18% 12%,rgba(0,255,135,.065),transparent 34%),radial-gradient(ellipse at 84% 85%,rgba(179,71,255,.085),transparent 38%),#06070b; }
+.lv2-orb-green { opacity:.58; }
+.lv2-orb-purple { opacity:.52; }
+.lv2-card { box-shadow:0 0 0 1px rgba(0,255,135,.045),0 34px 90px rgba(0,0,0,.72),0 0 34px rgba(179,71,255,.07),inset 0 1px rgba(255,255,255,.09); }
+.lv2-card-glow { opacity:.48; }
+.lv2-word-green { text-shadow:0 0 6px rgba(32,255,160,.54),0 0 15px rgba(0,255,135,.24); }
+.lv2-word-purple { text-shadow:0 0 6px rgba(220,156,255,.5),0 0 15px rgba(179,71,255,.26); }
+.lv2-brand-icon { box-shadow:0 0 15px rgba(0,255,135,.11),0 0 22px rgba(179,71,255,.07); }
+.lv2-google-btn { box-shadow:0 0 16px rgba(0,255,135,.045),inset 0 1px rgba(255,255,255,.08); }
+.lv2-neon-left { background:linear-gradient(to bottom,transparent,rgba(0,255,135,.32) 30%,rgba(0,255,135,.48) 50%,rgba(0,255,135,.32) 70%,transparent);box-shadow:0 0 12px rgba(0,255,135,.3),0 0 24px rgba(0,255,135,.14); }
+.lv2-neon-right { background:linear-gradient(to bottom,transparent,rgba(179,71,255,.32) 30%,rgba(179,71,255,.48) 50%,rgba(179,71,255,.32) 70%,transparent);box-shadow:0 0 12px rgba(179,71,255,.3),0 0 24px rgba(179,71,255,.14); }
+
+html[data-performance-mode="on"] *,
+html[data-performance-mode="on"] *::before,
+html[data-performance-mode="on"] *::after {
+  animation:none!important;
+  transition:none!important;
+  scroll-behavior:auto!important;
+}
+html[data-performance-mode="on"] .lv2-root::after,
+html[data-performance-mode="on"] .lv2-card-glow,
+html[data-performance-mode="on"] .ms2-scanline { display:none!important; }
+html[data-performance-mode="on"] .lv2-brand-icon { animation:none!important; }
+html[data-performance-mode="on"] .pn-performance-on .performance-mode-toggle { transition:none!important; }
 @media(max-width:420px) {
   .pn-kpi-row,.kpi-grid,.pn-cash-strip-four { grid-template-columns:1fr; }
   .pn-prod-grid,.pn-client-grid { grid-template-columns:1fr; }

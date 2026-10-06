@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 import {
   Activity, ArrowDownLeft, ArrowUpRight, Bell, BriefcaseBusiness,
   Check, CheckCheck, ChevronDown, Download, FileText, Filter, HandCoins,
@@ -13,7 +13,7 @@ import {
   FileSpreadsheet, ArrowRight,
   ShoppingCart, Package, Store, Layers,
   PackagePlus, ShoppingBag, DollarSign,
-  Trash2, ArchiveRestore, FileSignature,
+  Trash2, ArchiveRestore, FileSignature, Gauge, ZapOff,
 } from 'lucide-react'
 import { isSupabaseConfigured } from './lib/supabase'
 import { calcularPrestamoDirecto } from './utils/loanCalculator'
@@ -51,6 +51,27 @@ const daysUntil = (date) =>
   Math.round((new Date(`${date}T12:00:00`) - new Date(`${today}T12:00:00`)) / 86_400_000)
 
 const MONTHS_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
+const PERFORMANCE_MODE_KEY = 'pn-performance-mode'
+function readPerformancePreference() {
+  try {
+    const saved = localStorage.getItem(PERFORMANCE_MODE_KEY)
+    if (saved !== null) return saved === 'on'
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  } catch { return false }
+}
+let performanceModeActive = readPerformancePreference()
+
+function PerformanceToggle({ enabled, onToggle, className = '' }) {
+  return (
+    <button type="button" className={`performance-mode-toggle ${enabled ? 'is-active' : ''} ${className}`}
+      onClick={onToggle} aria-pressed={enabled}>
+      {enabled ? <ZapOff size={14}/> : <Gauge size={14}/>}
+      <span>Modo rendimiento</span>
+      <small>{enabled ? 'Activo' : 'Inactivo'}</small>
+    </button>
+  )
+}
 
 /* ═══════════════════════════════════════════════════════════════
    SISTEMA DE AYUDA CONTEXTUAL
@@ -871,10 +892,18 @@ function useCountUp(target, duration = 900) {
   const raf = useRef(null)
   useEffect(() => {
     if (target == null) return
+    const to = Number(target) || 0
+    if (performanceModeActive) {
+      raf.current = requestAnimationFrame(() => setDisplay(to))
+      return () => cancelAnimationFrame(raf.current)
+    }
     const start    = Date.now()
     const from     = 0
-    const to       = Number(target) || 0
     const tick = () => {
+      if (performanceModeActive) {
+        setDisplay(to)
+        return
+      }
       const elapsed = Date.now() - start
       const pct     = Math.min(elapsed / duration, 1)
       // ease-out cubic
@@ -884,7 +913,9 @@ function useCountUp(target, duration = 900) {
     }
     raf.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf.current)
-  }, [target, duration])
+  // La preferencia global se actualiza junto con el rerender del árbol de la app.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, duration, performanceModeActive])
   return display
 }
 
@@ -1049,6 +1080,7 @@ function CommandPalette({ loans, payments, mode = 'prestamos', onClose, onNaviga
 
 /* ─── App ──────────────────────────────────────────────────── */
 export default function App() {
+  const [performanceMode, setPerformanceMode] = useState(() => readPerformancePreference())
   const [tab, setTab] = useState(() => {
     // Si ya hay modo guardado, iniciar en la sección correcta
     try {
@@ -1088,6 +1120,20 @@ export default function App() {
   const [legalSection, setLegalSection]   = useState(null)
   const paymentLocks = useRef(new Set())
   const dataLoadVersion = useRef(0)
+
+  const togglePerformanceMode = useCallback(() => {
+    setPerformanceMode((current) => {
+      const next = !current
+      performanceModeActive = next
+      try { localStorage.setItem(PERFORMANCE_MODE_KEY, next ? 'on' : 'off') } catch { /* La preferencia sigue activa durante esta sesión. */ }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    performanceModeActive = performanceMode
+    document.documentElement.dataset.performanceMode = performanceMode ? 'on' : 'off'
+  }, [performanceMode])
 
   /* ── Toasts ── */
   const showToast = useCallback((message, kind = 'success') => setToast({ message, kind }), [])
@@ -1562,15 +1608,16 @@ export default function App() {
       <p>Conectando…</p>
     </div>
   )
-  if (isSupabaseConfigured && !user) return <><Login onSignIn={handleSignIn} onOpenLegal={setLegalSection}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
+  if (isSupabaseConfigured && !user) return <><Login onSignIn={handleSignIn} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
   /* ── Selector de modo (primera pantalla tras login) ── */
-  if (!modo) return <><ModeSelector onSelect={elegirModo} onOpenLegal={setLegalSection}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
+  if (!modo) return <><ModeSelector onSelect={elegirModo} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
   const rutaCount    = paymentsEfectivo.filter((p) => daysUntil(p.due) === 0 && (p.status === 'Pendiente' || p.status === 'Parcial')).length
 
   return (
-    <div className={`app-shell app-shell-${modo}`}>
+    <MotionConfig reducedMotion={performanceMode ? 'always' : 'never'} skipAnimations={performanceMode} transition={performanceMode ? { skipAnimations: true } : undefined}>
+    <div className={`app-shell app-shell-${modo} ${performanceMode ? 'pn-performance-on' : ''}`}>
       <aside className={`sidebar sidebar-${modo} ${mobileOpen ? 'sidebar-open' : ''}`}>
         {/* Brand con botón cambiar modo */}
         <div className="brand">
@@ -1607,6 +1654,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-bottom">
+          <PerformanceToggle enabled={performanceMode} onToggle={togglePerformanceMode}/>
           <div className="secure-card">
             <div className="secure-icon"><ShieldCheck size={16}/></div>
             <div><b>Datos protegidos</b><small>RLS · Cifrado</small></div>
@@ -1758,6 +1806,7 @@ export default function App() {
         {legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   )
 }
 
@@ -4593,7 +4642,7 @@ function RefinanciarModal({ loan, onClose, onCreate }) {
 /* ═══════════════════════════════════════════════════════════
    MODE SELECTOR — Cyberpunk Split Screen
 ════════════════════════════════════════════════════════════ */
-function ModeSelector({ onSelect, onOpenLegal }) {
+function ModeSelector({ onSelect, onOpenLegal, performanceMode, onTogglePerformance }) {
   const [hovered, setHovered] = useState(null)
 
   const modes = [
@@ -4624,7 +4673,9 @@ function ModeSelector({ onSelect, onOpenLegal }) {
   ]
 
   return (
-    <div className="ms2-root">
+    <MotionConfig reducedMotion={performanceMode ? 'always' : 'never'} skipAnimations={performanceMode} transition={performanceMode ? { skipAnimations: true } : undefined}>
+    <div className={`ms2-root ${performanceMode ? 'pn-performance-on' : ''}`}>
+      <PerformanceToggle enabled={performanceMode} onToggle={onTogglePerformance} className="performance-mode-floating"/>
       {/* Fondo animado */}
       <div className="ms2-bg" aria-hidden="true">
         <motion.div className="ms2-blob ms2-blob-green"
@@ -4727,6 +4778,7 @@ function ModeSelector({ onSelect, onOpenLegal }) {
       </motion.p>
       <LegalLinks onOpen={onOpenLegal}/>
     </div>
+    </MotionConfig>
   )
 }
 
@@ -4734,8 +4786,7 @@ function ModeSelector({ onSelect, onOpenLegal }) {
 /* ═══════════════════════════════════════════════════════════
    LOGIN — neon (lv2)
 ════════════════════════════════════════════════════════════ */
-function Login({ onSignIn, onOpenLegal }) {
-  const [reduced, setReduced] = useState(false)
+function Login({ onSignIn, onOpenLegal, performanceMode, onTogglePerformance }) {
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState('')
 
@@ -4753,9 +4804,10 @@ function Login({ onSignIn, onOpenLegal }) {
   ]
 
   return (
-    <div className={`lv2-root ${reduced ? 'lv2-reduced' : ''}`}>
+    <MotionConfig reducedMotion={performanceMode ? 'always' : 'never'} skipAnimations={performanceMode} transition={performanceMode ? { skipAnimations: true } : undefined}>
+    <div className={`lv2-root ${performanceMode ? 'lv2-reduced pn-performance-on' : ''}`}>
       {/* Background orbs */}
-      {!reduced && orbs.map((o, i) => (
+      {!performanceMode && orbs.map((o, i) => (
         <motion.div key={i} className={o.cls} style={o.style}
           animate={{ scale: [1, 1.4, 1], opacity: [0.5, 0.9, 0.5] }}
           transition={{ duration: 5 + i * 1.5, repeat: Infinity, delay: i * 0.8 }}/>
@@ -4832,13 +4884,12 @@ function Login({ onSignIn, onOpenLegal }) {
         {/* Footer */}
         <div className="lv2-footer">
           <span>© {new Date().getFullYear()} PrestaNeo</span>
-          <button type="button" className="lv2-reduced-btn" onClick={() => setReduced(v => !v)}>
-            {reduced ? 'Activar animaciones' : 'Reducir animaciones'}
-          </button>
+          <PerformanceToggle enabled={performanceMode} onToggle={onTogglePerformance} className="login-performance-toggle"/>
         </div>
         <LegalLinks onOpen={onOpenLegal}/>
       </motion.div>
     </div>
+    </MotionConfig>
   )
 }
 
