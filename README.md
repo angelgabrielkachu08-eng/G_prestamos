@@ -57,42 +57,21 @@ Dónde encontrarlos: **Supabase Dashboard → Project Settings → API → Proje
 
 ---
 
-## 3. Aplicar las migraciones SQL en Supabase
+## 3. Migraciones de Supabase
 
-Las migraciones están en `supabase/migrations/`. Aplícalas en orden en el **SQL Editor** de tu proyecto:
+Las migraciones viven en `supabase/migrations/` y deben aplicarse en orden:
 
-### 3.1 — Migración principal (esquema multitenant + triggers + RLS)
+1. `20260930032010_prestaneo_multitenant_core.sql` — esquema base, RLS y triggers.
+2. `20260930032144_prestaneo_search_path_fk_indexes.sql` — permisos, índices y `search_path`.
+3. `20261001000000_fix_monto_cuota_prestamos.sql` — compatibilidad de la cuota fija.
+4. `20261002000000_prestaneo_ventas_module.sql` — catálogo, ventas a crédito y su operación RPC.
+5. `20261003000000_prestaneo_papelera_clientes.sql` — archivo y restauración de clientes.
+6. `20261006000000_prestaneo_eliminar_cliente_papelera.sql` — purga de clientes archivados.
+7. `20261006010000_prestaneo_preservar_caja_al_purgar_cliente.sql` — preservación contable durante la transición.
+8. `20261006020000_prestaneo_borrar_movimientos_al_purgar_cliente.sql` — purga de movimientos vinculados al cliente eliminado.
+9. `20261006120000_prestaneo_atomic_loan_create.sql` — alta transaccional de préstamos y anulación/restauración auditable de Caja.
 
-Copia y ejecuta el contenido de:
-
-```
-supabase/migrations/20260930032010_prestaneo_multitenant_core.sql
-```
-
-Esto crea / modifica:
-- Tablas: `clientes`, `prestamos`, `cuotas`, `pagos`, `caja`
-- Función RPC: `emitir_prestamo(p_cliente, p_prestamo, p_cuotas)`
-- Triggers: actualización automática de cuotas y libro de caja al registrar un pago
-- RLS: aislamiento completo por `owner_id = auth.uid()`
-- Storage bucket: `documentos-clientes` (privado, 10 MB, JPEG/PNG/PDF)
-
-### 3.2 — Migración de seguridad (search_path + índices adicionales)
-
-```
-supabase/migrations/20260930032144_prestaneo_search_path_fk_indexes.sql
-```
-
-### 3.3 — Eliminación permanente desde la papelera
-
-Aplica también esta migración para habilitar la eliminación definitiva de clientes archivados:
-
-```
-supabase/migrations/20261006000000_prestaneo_eliminar_cliente_papelera.sql
-```
-
-La operación elimina sus préstamos, cuotas y ventas asociadas; conserva los importes y conceptos históricos de caja. Solo permite purgar clientes que ya estén archivados y pertenezcan al usuario autenticado.
-
-> **Importante:** si tu proyecto Supabase ya tiene datos en las tablas, lee los comentarios al inicio del archivo core antes de ejecutar.
+**Si la base ya está en uso, no vuelvas a ejecutar la migración base.** Revisa el historial de migraciones de tu proyecto y ejecuta solo las que falten, en orden, desde el SQL Editor de Supabase. La app actual necesita la última migración para crear préstamos y gestionar anulaciones de Caja. El archivo core advierte que requiere atención especial si hay datos previos.
 
 ---
 

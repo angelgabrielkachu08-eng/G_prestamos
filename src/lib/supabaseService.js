@@ -8,6 +8,19 @@ import { supabase } from './supabase'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
+// PostgREST limita cada respuesta; pagina los historiales para no calcular
+// saldos ni reportes con una muestra silenciosamente truncada.
+async function queryAllPages(buildQuery, pageSize = 500) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1)
+    if (error) throw new Error(error.message)
+    rows.push(...(data ?? []))
+    if (!data || data.length < pageSize) break
+  }
+  return { data: rows, error: null }
+}
+
 /* ─────────────────────────────────────────────
    Helpers internos
 ───────────────────────────────────────────── */
@@ -54,38 +67,37 @@ export async function cargarCarteraCompleta(userId) {
 
   const [clientResult, loanResult, quotaResult, saleResult, ledgerResult, receiptResult, loanHistoryResult] =
     await Promise.all([
-      supabase
+      queryAllPages(() => supabase
         .from('clientes')
         .select('*')
         .eq('owner_id', userId)
-        .order('created_at', { ascending: false }),
+        .order('created_at', { ascending: false }).order('id')),
 
-      supabase
+      queryAllPages(() => supabase
         .from('prestamos')
         .select('*')
         .eq('owner_id', userId)
         .in('estado', ['activo', 'en_mora'])
-        .order('created_at', { ascending: false }),
+        .order('created_at', { ascending: false }).order('id')),
 
-      supabase
+      queryAllPages(() => supabase
         .from('cuotas')
         .select('*')
         .eq('owner_id', userId)
-        .order('fecha_vencimiento'),
+        .order('fecha_vencimiento').order('id')),
 
-      supabase
+      queryAllPages(() => supabase
         .from('ventas')
         .select('id, referencia, cliente_id')
-        .eq('owner_id', userId),
+        .eq('owner_id', userId).order('created_at', { ascending: false }).order('id')),
 
-      supabase
+      queryAllPages(() => supabase
         .from('caja')
-        .select('id, tipo, concepto, monto, fecha, pago_id, prestamo_id, venta_id')
+        .select('id, tipo, concepto, monto, fecha, pago_id, prestamo_id, venta_id, anulado_at, anulado_motivo')
         .eq('owner_id', userId)
-        .order('fecha', { ascending: false })
-        .limit(200),
+        .order('fecha', { ascending: false }).order('id')),
 
-      supabase
+      queryAllPages(() => supabase
         .from('pagos')
         .select(`
           *,
@@ -99,13 +111,12 @@ export async function cargarCarteraCompleta(userId) {
           )
         `)
         .eq('owner_id', userId)
-        .order('recibido_at', { ascending: false })
-        .limit(300),
+        .order('recibido_at', { ascending: false }).order('id')),
 
-      supabase
+      queryAllPages(() => supabase
         .from('prestamos')
         .select('id, referencia, cliente_id')
-        .eq('owner_id', userId),
+        .eq('owner_id', userId).order('id')),
     ])
 
   // Verificar errores en cualquiera de las queries
@@ -170,7 +181,10 @@ export async function cargarCarteraCompleta(userId) {
 
   // Transformar cuotas al modelo de cobros
   const payments = quotaResult.data
-    .filter((q) => q.estado !== 'pagada' && !clientes.get(loanMap.get(q.prestamo_id)?.cliente_id)?.eliminado)
+    .filter((q) => {
+      const loan = loanMap.get(q.prestamo_id) ?? loanHistoryMap.get(q.prestamo_id)
+      return q.estado !== 'pagada' && !clientes.get(loan?.cliente_id)?.eliminado
+    })
     .map((q) => {
       const loan = loanMap.get(q.prestamo_id) ?? loanHistoryMap.get(q.prestamo_id)
       const client = clientes.get(loan?.cliente_id)
@@ -204,8 +218,10 @@ export async function cargarCarteraCompleta(userId) {
     const loan = m.prestamo_id ? (loanMap.get(m.prestamo_id) ?? loanHistoryMap.get(m.prestamo_id)) : null
     const loanClient = loan ? clientes.get(loan.cliente_id) : null
     const receipt = m.pago_id ? receiptMap.get(m.pago_id) : null
-    const receiptLoan = receipt?.cuota?.prestamo
-    const receiptClient = Array.isArray(receiptLoan?.cliente) ? receiptLoan.cliente[0] : receiptLoan?.cliente
+    const receiptLoanRaw = receipt?.cuota?.prestamo
+    const receiptLoan = Array.isArray(receiptLoanRaw) ? receiptLoanRaw[0] : receiptLoanRaw
+    const receiptClientRaw = receiptLoan?.cliente
+    const receiptClient = Array.isArray(receiptClientRaw) ? receiptClientRaw[0] : receiptClientRaw
     const sale = m.venta_id ? saleMap.get(m.venta_id) : null
     const saleClient = sale ? clientes.get(sale.cliente_id) : null
     const reference = loan?.referencia ?? receiptLoan?.referencia ?? sale?.referencia
@@ -224,10 +240,12 @@ export async function cargarCarteraCompleta(userId) {
       timeStyle: 'short',
     }),
     rawDate: m.fecha,
+    voided: Boolean(m.anulado_at),
+    voidReason: m.anulado_motivo ?? '',
     // Si tiene venta_id directamente es un movimiento de ventas.
     // Si tiene prestamo_id o pago_id sin venta_id => efectivo.
     // Fallback: detectar por prefijo del concepto (CV- = crédito venta).
-    origen: m.venta_id != null
+    origen: m.venta_id != null || receiptLoan?.origen === 'venta'
       ? 'venta'
       : m.concepto?.includes('CV-') || m.concepto?.startsWith('Anticipo venta')
         ? 'venta'
@@ -236,25 +254,29 @@ export async function cargarCarteraCompleta(userId) {
   })
 
   // Transformar pagos como recibos
-  const receipts = receiptResult.data.filter((p) => {
-    const relation = p.cuota?.prestamo?.cliente
-    const client = Array.isArray(relation) ? relation[0] : relation
-    return !client?.eliminado
-  }).map((p) => ({
-    id: p.referencia,
-    dbId: p.id,
-    loanId: p.cuota?.prestamo?.referencia ?? '',
-    client: p.cuota?.prestamo?.cliente?.nombre_completo ?? 'Cliente',
-    phone: p.cuota?.prestamo?.cliente?.telefono ?? '',
-    amount: Number(p.monto),
-    capital: Number(p.capital),
-    interest: Number(p.interes),
-    due: p.recibido_at,
-    paidAt: p.recibido_at,
-    status: 'Pagado',
-    n: p.cuota?.numero,
-    method: p.metodo,
-  }))
+  const receipts = receiptResult.data.flatMap((p) => {
+    const loanRaw = p.cuota?.prestamo
+    const loan = Array.isArray(loanRaw) ? loanRaw[0] : loanRaw
+    const clientRaw = loan?.cliente
+    const client = Array.isArray(clientRaw) ? clientRaw[0] : clientRaw
+    if (client?.eliminado) return []
+    return [{
+      id: p.referencia,
+      dbId: p.id,
+      loanId: loan?.referencia ?? '',
+      client: client?.nombre_completo ?? 'Cliente',
+      phone: client?.telefono ?? '',
+      amount: Number(p.monto),
+      capital: Number(p.capital),
+      interest: Number(p.interes),
+      due: p.recibido_at,
+      paidAt: p.recibido_at,
+      status: 'Pagado',
+      n: p.cuota?.numero,
+      method: p.metodo,
+      origen: loan?.origen ?? 'efectivo',
+    }]
+  })
 
   return { loans, payments, ledger, receipts }
 }
@@ -263,161 +285,47 @@ export async function cargarCarteraCompleta(userId) {
    PRÉSTAMOS
 ───────────────────────────────────────────── */
 
-/**
- * Crea un préstamo completo insertando directamente en las tablas.
- * Ya no usa el RPC emitir_prestamo para evitar problemas con columnas
- * heredadas del schema original que la función PL/pgSQL no conoce.
- *
- * Flujo:
- *  1. INSERT clientes
- *  2. INSERT prestamos  (incluye monto_cuota que el RPC original omitía)
- *  3. INSERT cuotas (batch)
- *
- * Si cualquier paso falla se lanza un Error con el mensaje de Supabase
- * y el llamador (handleCreateLoan) lo captura con try/catch.
- */
+/** Crea cliente, préstamo, cuotas y desembolso en una sola transacción. */
 export async function crearPrestamo(userId, form) {
   const reference = `LN-${String(Date.now()).slice(-7)}`
-
   const montoCuota = form.schedule.length > 0
     ? Number(Number(form.schedule[0].monto_cuota).toFixed(2))
     : Number((form.principal * (1 + form.rate / 100) / form.installments).toFixed(2))
-
-  /* ── 1. Crear o reutilizar cliente ──
-     Si el DNI viene vacío, nunca lo enviamos como null para no violar
-     el unique constraint (owner_id, documento). En su lugar buscamos
-     al cliente por nombre+teléfono; si ya existe, lo reutilizamos. */
-  let clienteId
-
-  const dniLimpio = form.dni ? String(form.dni).trim() : ''
-
-  if (dniLimpio) {
-    // Hay DNI: intentar encontrar cliente existente con ese DNI
-    const { data: existing } = await supabase
-      .from('clientes')
-      .select('id')
-      .eq('owner_id', userId)
-      .eq('documento', dniLimpio)
-      .maybeSingle()
-
-    if (existing) {
-      // Ya existe — actualizar datos y reutilizar
-      clienteId = existing.id
-      await supabase.from('clientes').update({
-        nombre_completo: form.client,
-        telefono:        form.phone,
-        direccion:       form.address || null,
-        nivel_riesgo:    String(form.risk).toLowerCase(),
-      }).eq('id', clienteId)
-    }
+  const p_cliente = {
+    nombre_completo: form.client,
+    documento: form.dni?.trim() || null,
+    telefono: form.phone || '',
+    direccion: form.address || null,
+    nivel_riesgo: String(form.risk || 'medio').toLowerCase(),
   }
-
-  if (!clienteId) {
-    // No existe o no hay DNI — insertar nuevo cliente SIN campo documento cuando está vacío
-    const payload = {
-      owner_id:        userId,
-      nombre_completo: form.client,
-      telefono:        form.phone,
-      direccion:       form.address || null,
-      nivel_riesgo:    String(form.risk).toLowerCase(),
-    }
-    // Solo incluir documento si realmente hay un valor — nunca enviar null
-    if (dniLimpio) payload.documento = dniLimpio
-
-    const { data: clienteData, error: clienteError } = await supabase
-      .from('clientes')
-      .insert(payload)
-      .select('id')
-      .single()
-
-    if (clienteError) throw new Error(`Error al crear cliente: ${clienteError.message}`)
-    clienteId = clienteData.id
+  const p_prestamo = {
+    referencia: reference,
+    capital: Number(form.principal),
+    tasa_interes: Number(form.rate),
+    total_interes: Number((form.principal * (form.rate / 100)).toFixed(2)),
+    total_a_pagar: Number((form.principal * (1 + form.rate / 100)).toFixed(2)),
+    monto_cuota: montoCuota,
+    cantidad_cuotas: Number(form.installments),
+    frecuencia: form.frequency,
+    omitir_domingo: form.frequency === 'diario' && Boolean(form.omitSunday),
+    fecha_desembolso: form.firstDue,
   }
-
-  /* ── 2. Crear préstamo ── */
-  const { data: prestamoData, error: prestamoError } = await supabase
-    .from('prestamos')
-    .insert({
-      owner_id:       userId,
-      cliente_id:     clienteId,
-      referencia:     reference,
-      capital:        form.principal,
-      tasa_interes:   form.rate,
-      total_interes:  Number((form.principal * (form.rate / 100)).toFixed(2)),
-      total_a_pagar:  Number((form.principal * (1 + form.rate / 100)).toFixed(2)),
-      monto_cuota:    montoCuota,
-      cantidad_cuotas: form.installments,
-      frecuencia:     form.frequency,
-      omitir_domingo: form.frequency === 'diario' && Boolean(form.omitSunday),
-      fecha_desembolso: form.firstDue,
-      estado:         'activo',
-    })
-    .select('id, referencia')
-    .single()
-
-  if (prestamoError) {
-    // Intentar limpiar el cliente huérfano (best-effort, no bloquea)
-    await supabase.from('clientes').delete().eq('id', clienteId)
-    throw new Error(`Error al crear préstamo: ${prestamoError.message}`)
-  }
-
-  const prestamoId = prestamoData.id
-
-  /* ── 3. Crear cuotas (batch) ── */
-  const cuotasPayload = form.schedule.map((q) => ({
-    owner_id:         userId,
-    prestamo_id:      prestamoId,
-    numero:           q.numero_cuota,
+  const p_cuotas = form.schedule.map(q => ({
+    numero_cuota: q.numero_cuota,
     fecha_vencimiento: q.fecha_vencimiento,
-    capital:          Number(Number(q.capital_cuota).toFixed(2)),
-    interes:          Number(Number(q.interes_cuota).toFixed(2)),
-    monto:            Number(Number(q.monto_cuota).toFixed(2)),
-    monto_pagado:     0,
-    estado:           'pendiente',
+    capital_cuota: Number(Number(q.capital_cuota).toFixed(2)),
+    interes_cuota: Number(Number(q.interes_cuota).toFixed(2)),
+    monto_cuota: Number(Number(q.monto_cuota).toFixed(2)),
   }))
-
-  const { data: cuotasData, error: cuotasError } = await supabase
-    .from('cuotas')
-    .insert(cuotasPayload)
-    .select('id, numero, fecha_vencimiento, capital, interes, monto')
-
-  if (cuotasError) {
-    // Limpiar préstamo y cliente huérfanos
-    await supabase.from('prestamos').delete().eq('id', prestamoId)
-    await supabase.from('clientes').delete().eq('id', clienteId)
-    throw new Error(`Error al crear cuotas: ${cuotasError.message}`)
-  }
-
-  /* ── 4. Registrar desembolso en caja (best-effort — el trigger debería haberlo hecho) ── */
-  // Si el trigger registrar_desembolso_en_caja ya existe en Supabase, esto no duplica;
-  // si no existe, lo registramos manualmente.
-  const { data: cajaCheck } = await supabase
-    .from('caja')
-    .select('id')
-    .eq('prestamo_id', prestamoId)
-    .limit(1)
-
-  if (!cajaCheck || cajaCheck.length === 0) {
-    const { error: cajaError } = await supabase.from('caja').insert({
-      owner_id:    userId,
-      prestamo_id: prestamoId,
-      tipo:        'salida',
-      concepto:    `Desembolso ${reference}`,
-      monto:       form.principal,
-    })
-    if (cajaError) throw new Error(cajaError.message)
-  }
-
-  const { data: cajaMovement } = await supabase
-    .from('caja').select('id').eq('prestamo_id', prestamoId).eq('tipo', 'salida').maybeSingle()
+  const { data: dbResult, error } = await supabase.rpc('crear_prestamo_atomico', {
+    p_cliente,
+    p_prestamo,
+    p_cuotas,
+  })
+  if (error) throw new Error(error.message)
 
   return {
-    dbResult: {
-      cliente_id:  clienteId,
-      prestamo_id: prestamoId,
-      cuotas:      cuotasData,
-      movimiento_caja_id: cajaMovement?.id,
-    },
+    dbResult,
     reference,
   }
 }
@@ -581,19 +489,19 @@ export async function cargarHistorialPrestamos(userId) {
   const t = new Date().toISOString().slice(0, 10)
 
   const [loanResult, clientResult, quotaResult] = await Promise.all([
-    supabase
+    queryAllPages(() => supabase
       .from('prestamos')
       .select('*')
       .eq('owner_id', userId)
-      .order('created_at', { ascending: false }),
-    supabase
+      .order('created_at', { ascending: false }).order('id')),
+    queryAllPages(() => supabase
       .from('clientes')
-      .select('id, nombre_completo, telefono, documento, nivel_riesgo')
-      .eq('owner_id', userId),
-    supabase
+      .select('id, nombre_completo, telefono, documento, nivel_riesgo, eliminado')
+      .eq('owner_id', userId).order('id')),
+    queryAllPages(() => supabase
       .from('cuotas')
       .select('prestamo_id, estado, monto, monto_pagado, fecha_vencimiento')
-      .eq('owner_id', userId),
+      .eq('owner_id', userId).order('id')),
   ])
 
   if (loanResult.error) throw new Error(loanResult.error.message)
@@ -606,7 +514,7 @@ export async function cargarHistorialPrestamos(userId) {
     quotasByLoan.set(q.prestamo_id, arr)
   }
 
-  return loanResult.data.map((l) => {
+  return loanResult.data.filter(l => !clientes.get(l.cliente_id)?.eliminado).map((l) => {
     const client = clientes.get(l.cliente_id) ?? {}
     const quotas = quotasByLoan.get(l.id) ?? []
     const hasOverdue = quotas.some((q) => q.estado !== 'pagada' && q.fecha_vencimiento < t)
@@ -653,20 +561,20 @@ export async function calcularProyeccion(userId, dias = 30) {
   const desde  = hoy.toISOString().slice(0, 10)
   const hastaS = hasta.toISOString().slice(0, 10)
 
-  const { data, error } = await supabase
+  const { data, error } = await queryAllPages(() => supabase
     .from('cuotas')
     .select(`
       fecha_vencimiento,
       monto,
       monto_pagado,
       estado,
-      prestamo:prestamos ( cliente:clientes ( nombre_completo ) )
+      prestamo:prestamos ( cliente:clientes ( nombre_completo, eliminado ) )
     `)
     .eq('owner_id', userId)
     .neq('estado', 'pagada')
     .gte('fecha_vencimiento', desde)
     .lte('fecha_vencimiento', hastaS)
-    .order('fecha_vencimiento')
+    .order('fecha_vencimiento').order('id'))
 
   if (error) throw new Error(error.message)
 
@@ -675,6 +583,11 @@ export async function calcularProyeccion(userId, dias = 30) {
   let totalEsperado = 0
 
   for (const q of data) {
+    const loanRaw = q.prestamo
+    const loan = Array.isArray(loanRaw) ? loanRaw[0] : loanRaw
+    const clientRaw = loan?.cliente
+    const client = Array.isArray(clientRaw) ? clientRaw[0] : clientRaw
+    if (client?.eliminado) continue
     const saldo = Math.max(0, Number(q.monto) - Number(q.monto_pagado ?? 0))
     byDay[q.fecha_vencimiento] = (byDay[q.fecha_vencimiento] ?? 0) + saldo
     totalEsperado += saldo
@@ -704,20 +617,22 @@ export async function calcularProyeccion(userId, dias = 30) {
  * Suma de cobros (entradas en caja) agrupados por mes, últimos 12 meses.
  * Retorna array de 12 elementos { mes: 'YYYY-MM', total: number }.
  */
-export async function cobradoPorMes(userId) {
-  const { data, error } = await supabase
-    .from('caja')
-    .select('monto, fecha')
+export async function cobradoPorMes(userId, origen = 'efectivo') {
+  const { data, error } = await queryAllPages(() => supabase
+    .from('pagos')
+    .select('monto, recibido_at, cuota:cuotas(prestamo:prestamos(origen))')
     .eq('owner_id', userId)
-    .eq('tipo', 'entrada')
-    .order('fecha')
+    .order('recibido_at').order('id'))
 
   if (error) return Array(12).fill(0)
 
   const meses = {}
-  for (const m of data) {
-    const key = m.fecha.slice(0, 7) // 'YYYY-MM'
-    meses[key] = (meses[key] ?? 0) + Number(m.monto)
+  for (const p of data) {
+    const loanRaw = p.cuota?.prestamo
+    const loan = Array.isArray(loanRaw) ? loanRaw[0] : loanRaw
+    if (origen && (loan?.origen ?? 'efectivo') !== origen) continue
+    const key = p.recibido_at.slice(0, 7)
+    meses[key] = (meses[key] ?? 0) + Number(p.monto)
   }
 
   // Últimos 12 meses desde hoy hacia atrás
@@ -741,12 +656,12 @@ export async function cobradoPorMes(userId) {
 
 /** Carga todos los productos activos del usuario */
 export async function cargarProductos(userId) {
-  const { data, error } = await supabase
+  const { data, error } = await queryAllPages(() => supabase
     .from('productos')
     .select('*')
     .eq('owner_id', userId)
     .eq('activo', true)
-    .order('nombre')
+    .order('nombre').order('id'))
 
   if (error) throw new Error(error.message)
 
@@ -814,7 +729,7 @@ export async function desactivarProducto(productoId) {
 
 /** Carga ventas con detalle de productos y estado del crédito */
 export async function cargarVentas(userId) {
-  const { data, error } = await supabase
+  const { data, error } = await queryAllPages(() => supabase
     .from('ventas')
     .select(`
       *,
@@ -826,7 +741,7 @@ export async function cargarVentas(userId) {
       prestamo:prestamos ( id, referencia, estado, origen, cantidad_cuotas, monto_cuota )
     `)
     .eq('owner_id', userId)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false }).order('id'))
 
   if (error) throw new Error(error.message)
 
@@ -953,7 +868,7 @@ export async function crearVentaCredito(userId, form) {
 export async function cargarCuotasUnificadas(userId) {
   const t = today()
 
-  const { data, error } = await supabase
+  const { data, error } = await queryAllPages(() => supabase
     .from('cuotas')
     .select(`
       *,
@@ -966,19 +881,23 @@ export async function cargarCuotasUnificadas(userId) {
             producto:productos ( nombre, categoria )
           )
         ),
-        cliente:clientes ( nombre_completo, telefono )
+        cliente:clientes ( nombre_completo, telefono, eliminado )
       )
     `)
     .eq('owner_id', userId)
     .neq('estado', 'pagada')
-    .order('fecha_vencimiento')
+    .order('fecha_vencimiento').order('id'))
 
   if (error) throw new Error(error.message)
 
-  return data.map(q => {
-    const prestamo = q.prestamo ?? {}
-    const cliente  = prestamo.cliente ?? {}
-    const venta    = prestamo.venta
+  return data.flatMap(q => {
+    const loanRaw = q.prestamo
+    const prestamo = (Array.isArray(loanRaw) ? loanRaw[0] : loanRaw) ?? {}
+    const clientRaw = prestamo.cliente
+    const cliente = (Array.isArray(clientRaw) ? clientRaw[0] : clientRaw) ?? {}
+    if (cliente.eliminado) return []
+    const saleRaw = prestamo.venta
+    const venta = Array.isArray(saleRaw) ? saleRaw[0] : saleRaw
     const remaining = Math.max(0, Number(q.monto) - Number(q.monto_pagado ?? 0))
     const ratio     = Number(q.monto) > 0 ? remaining / Number(q.monto) : 0
     const overdue   = q.fecha_vencimiento < t
@@ -994,7 +913,7 @@ export async function cargarCuotasUnificadas(userId) {
       }
     }
 
-    return {
+    return [{
       id:           q.id,
       loanId:       prestamo.referencia ?? '',
       client:       cliente.nombre_completo ?? 'Cliente',
@@ -1010,7 +929,7 @@ export async function cargarCuotasUnificadas(userId) {
       origen:       prestamo.origen ?? 'efectivo',  // 'efectivo' | 'venta'
       productoLabel,
       ventaRef:     venta?.referencia ?? null,
-    }
+    }]
   })
 }
 
@@ -1037,48 +956,32 @@ export async function eliminarClientePermanente(clienteId) {
 }
 
 /** Elimina exclusivamente filas de Caja pertenecientes al usuario; pagos y cuotas permanecen intactos. */
-export async function eliminarMovimientosCaja(userId, movementIds, scope = null) {
-  let ids = [...new Set((movementIds ?? []).filter(Boolean))]
-  if (scope === 'prestamos' || scope === 'ventas') {
-    ids = []
-    for (let from = 0; ; from += 1000) {
-      const { data: rows, error: listError } = await supabase
-        .from('caja')
-        .select('id, venta_id, concepto')
-        .eq('owner_id', userId)
-        .range(from, from + 999)
-      if (listError) throw new Error(listError.message)
-      const scopedIds = (rows ?? []).filter(row => {
-        const isVenta = row.venta_id != null || row.concepto?.includes('CV-') || row.concepto?.startsWith('Anticipo venta')
-        return scope === 'ventas' ? isVenta : !isVenta
-      }).map(row => row.id)
-      ids.push(...scopedIds)
-      if ((rows ?? []).length < 1000) break
-    }
-  }
-  if (!ids.length) return 0
-  let deletedCount = 0
-  for (let from = 0; from < ids.length; from += 500) {
-    const { data, error } = await supabase
-      .from('caja')
-      .delete()
-      .eq('owner_id', userId)
-      .in('id', ids.slice(from, from + 500))
-      .select('id')
-    if (error) throw new Error(error.message)
-    deletedCount += data?.length ?? 0
-  }
-  return deletedCount
+export async function anularMovimientosCaja(movementIds, scope = null, reason = '') {
+  const ids = [...new Set((movementIds ?? []).filter(Boolean))]
+  if (!ids.length && !['prestamos', 'ventas'].includes(scope)) return 0
+  const { data, error } = await supabase.rpc('anular_movimientos_caja', {
+    p_ids: scope ? null : ids,
+    p_scope: scope,
+    p_motivo: reason,
+  })
+  if (error) throw new Error(error.message)
+  return Number(data) || 0
+}
+
+/** Restaura un movimiento anulado, conservando su motivo anterior en la auditoría. */
+export async function restaurarMovimientoCaja(movementId) {
+  const { error } = await supabase.rpc('restaurar_movimiento_caja', { p_movimiento_id: movementId })
+  if (error) throw new Error(error.message)
 }
 
 /** Carga clientes en la papelera */
 export async function cargarPapelera(userId) {
-  const { data, error } = await supabase
+  const { data, error } = await queryAllPages(() => supabase
     .from('clientes')
     .select('*')
     .eq('owner_id', userId)
     .eq('eliminado', true)
-    .order('eliminado_at', { ascending: false })
+    .order('eliminado_at', { ascending: false }).order('id'))
   if (error) throw new Error(error.message)
   return data
 }

@@ -27,7 +27,7 @@ import {
   cargarVentas, crearVentaCredito, cargarCuotasUnificadas,
   // Papelera
   archivarCliente, restaurarCliente, cargarPapelera, cargarFichaCliente, eliminarClientePermanente,
-  eliminarMovimientosCaja,
+  anularMovimientosCaja, restaurarMovimientoCaja,
 } from './lib/supabaseService'
 
 const exportComprobanteDocx = async (...args) =>
@@ -894,6 +894,7 @@ function useCountUp(target, duration = 900) {
 const NAV_PRESTAMOS = [
   { id: 'p_inicio',   label: 'Inicio',          icon: LayoutDashboard },
   { id: 'p_nuevo',    label: 'Nuevo préstamo',   icon: Plus },
+  { id: 'p_ruta',     label: 'Cobros',           icon: Route },
   { id: 'p_clientes', label: 'Clientes',         icon: Users },
   { id: 'p_papelera', label: 'Papelera',         icon: Trash2 },
   { id: 'p_caja',     label: 'Caja',             icon: Wallet },
@@ -969,7 +970,7 @@ function Toast({ message, kind = 'success', onDismiss }) {
 }
 
 /* ─── Command Palette ─────────────────────────────────────── */
-function CommandPalette({ loans, payments, onClose, onNavigate }) {
+function CommandPalette({ loans, payments, mode = 'prestamos', onClose, onNavigate }) {
   const [q, setQ] = useState('')
   const inputRef = useRef(null)
 
@@ -980,25 +981,18 @@ function CommandPalette({ loans, payments, onClose, onNavigate }) {
     const lower = q.toLowerCase()
     const loanHits = loans.filter((l) =>
       l.client.toLowerCase().includes(lower) || l.id.toLowerCase().includes(lower)
-    ).slice(0, 5).map((l) => ({ type: 'loan', id: l.id, label: l.client, sub: `${l.id} · ${fmt(l.principal)}`, status: l.status }))
+    ).slice(0, 5).map((l) => ({ type: 'loan', id: l.id, tab: mode === 'ventas' ? 'v_clientes' : 'p_clientes', label: l.client, sub: `${l.id} · ${fmt(l.principal)}`, status: l.status }))
 
     const payHits = payments.filter((p) =>
       p.client.toLowerCase().includes(lower) && p.status !== 'Pagado'
-    ).slice(0, 4).map((p) => ({ type: 'payment', id: p.id, label: p.client, sub: `Cuota ${p.n} · ${fmt(p.amount)} · vence ${p.due}`, status: p.status }))
+    ).slice(0, 4).map((p) => ({ type: 'payment', id: p.id, tab: mode === 'ventas' ? 'v_ventas' : 'p_ruta', label: p.client, sub: `Cuota ${p.n} · ${fmt(p.amount)} · vence ${p.due}`, status: p.status }))
 
     return [...loanHits, ...payHits]
-  }, [q, loans, payments])
+  }, [q, loans, payments, mode])
 
-  const navActions = [
-    { label: 'Ir a Resumen',        sub: 'Dashboard',      tab: 'dashboard',    icon: LayoutDashboard },
-    { label: 'Ir a Ruta de Cobro',  sub: 'Cobros de hoy',  tab: 'ruta',         icon: Route },
-    { label: 'Ir a Cobranzas',      sub: 'Gestión cobros', tab: 'cobros',       icon: HandCoins },
-    { label: 'Ir a Préstamos',      sub: 'Cartera activa', tab: 'prestamos',    icon: BriefcaseBusiness },
-    { label: 'Ir a Alertas',        sub: 'Vencimientos',   tab: 'alertas',      icon: Bell },
-    { label: 'Ir a Estadísticas',   sub: 'Métricas',       tab: 'estadisticas', icon: PieChart },
-    { label: 'Ir a Caja',           sub: 'Libro de caja',  tab: 'caja',         icon: Wallet },
-    { label: 'Ir a Comprobantes',   sub: 'Recibos',        tab: 'comprobantes', icon: ReceiptText },
-  ].filter((a) => !q.trim() || a.label.toLowerCase().includes(q.toLowerCase()))
+  const navActions = (mode === 'ventas' ? NAV_VENTAS : NAV_PRESTAMOS)
+    .map(({ id, label, icon }) => ({ label: `Ir a ${label}`, sub: mode === 'ventas' ? 'Gestión de ventas' : 'Gestión de préstamos', tab: id, icon }))
+    .filter((a) => !q.trim() || a.label.toLowerCase().includes(q.toLowerCase()))
 
   return (
     <motion.div className="cmd-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1019,7 +1013,7 @@ function CommandPalette({ loans, payments, onClose, onNavigate }) {
               <p className="cmd-group-label">Resultados</p>
               {results.map((r) => (
                 <button key={r.id} className="cmd-item" onClick={() => {
-                  onNavigate(r.type === 'loan' ? 'prestamos' : 'cobros')
+                  onNavigate(r.tab)
                   onClose()
                 }}>
                   <div className={`cmd-dot ${r.status === 'En mora' || r.status === 'Vencido' ? 'red' : r.status === 'Pagado' ? 'green' : 'purple'}`} />
@@ -1093,6 +1087,7 @@ export default function App() {
   const [dataError, setDataError]         = useState(null)
   const [legalSection, setLegalSection]   = useState(null)
   const paymentLocks = useRef(new Set())
+  const dataLoadVersion = useRef(0)
 
   /* ── Toasts ── */
   const showToast = useCallback((message, kind = 'success') => setToast({ message, kind }), [])
@@ -1107,17 +1102,19 @@ export default function App() {
 
   /* ── Carga de datos ── */
   const loadData = useCallback(async (uid) => {
+    const requestVersion = ++dataLoadVersion.current
     setLoading(true)
     setDataError(null)
     try {
       const [cartera, historial, bars, prods, vtas, rutaUni] = await Promise.all([
         cargarCarteraCompleta(uid),
-        cargarHistorialPrestamos(uid).catch(() => []),
-        cobradoPorMes(uid).catch(() => Array(12).fill(0)),
-        cargarProductos(uid).catch(() => []),
-        cargarVentas(uid).catch(() => []),
-        cargarCuotasUnificadas(uid).catch(() => []),
+        cargarHistorialPrestamos(uid),
+        cobradoPorMes(uid),
+        cargarProductos(uid),
+        cargarVentas(uid),
+        cargarCuotasUnificadas(uid),
       ])
+      if (requestVersion !== dataLoadVersion.current) return
       setLoans(cartera.loans)
       setPayments(cartera.payments)
       setLedger(cartera.ledger)
@@ -1128,22 +1125,36 @@ export default function App() {
       setVentas(vtas)
       setRutaUnificada(rutaUni)
     } catch (err) {
+      if (requestVersion !== dataLoadVersion.current) return
       setDataError(err.message)
       showToast(err.message, 'error')
     } finally {
-      setLoading(false)
+      if (requestVersion === dataLoadVersion.current) setLoading(false)
     }
   }, [showToast])
 
   const handleDeleteCashMovements = useCallback(async (movementIds, options = {}) => {
-    if (!user || !movementIds?.length) return false
+    if (!user || (!movementIds?.length && !(options.bulk && ['prestamos', 'ventas'].includes(options.mode)))) return false
     try {
-      const deletedCount = await eliminarMovimientosCaja(user.id, movementIds, options.bulk ? options.mode : null)
+      const affectedCount = await anularMovimientosCaja(movementIds, options.bulk ? options.mode : null, options.reason)
       await loadData(user.id)
-      showToast(deletedCount === 1 ? 'Movimiento quitado de Caja' : `${deletedCount} movimientos quitados de Caja`)
+      showToast(affectedCount === 1 ? 'Movimiento anulado; quedó guardado en el historial' : `${affectedCount} movimientos anulados y guardados en el historial`)
       return true
     } catch (err) {
       showToast(`No se pudieron eliminar los movimientos: ${err.message}`, 'error')
+      return false
+    }
+  }, [user, loadData, showToast])
+
+  const handleRestoreCashMovement = useCallback(async (movementId) => {
+    if (!user || !movementId) return false
+    try {
+      await restaurarMovimientoCaja(movementId)
+      await loadData(user.id)
+      showToast('Movimiento restaurado en Caja')
+      return true
+    } catch (err) {
+      showToast(`No se pudo restaurar el movimiento: ${err.message}`, 'error')
       return false
     }
   }, [user, loadData, showToast])
@@ -1168,6 +1179,7 @@ export default function App() {
   const allLoansEfectivo = useMemo(() => allLoans.filter(l => (l.origen ?? 'efectivo') === 'efectivo'), [allLoans])
   // Solo cuotas de préstamos en efectivo
   const paymentsEfectivo = useMemo(() => payments.filter(p => (p.origen ?? 'efectivo') === 'efectivo'), [payments])
+  const receiptsEfectivo = useMemo(() => receipts.filter(r => (r.origen ?? 'efectivo') === 'efectivo'), [receipts])
   // Separar ledger por módulo
   const ledgerEfectivo = useMemo(() => ledger.filter(m => (m.origen ?? 'efectivo') === 'efectivo'), [ledger])
   const ledgerVentas   = useMemo(() => ledger.filter(m => m.origen === 'venta'), [ledger])
@@ -1176,19 +1188,19 @@ export default function App() {
   const totals = useMemo(() => {
     const principal    = loansEfectivo.reduce((s, l) => s + Number(l.principal), 0)
     const returnTotal  = loansEfectivo.reduce((s, l) => s + Number(l.principal) * (1 + Number(l.rate) / 100), 0)
-    const caja         = ledgerEfectivo.reduce((s, m) => s + (m.type === 'Entrada' ? m.amount : -m.amount), 0)
+    const caja         = ledgerEfectivo.filter(m => !m.voided).reduce((s, m) => s + (m.type === 'Entrada' ? m.amount : -m.amount), 0)
     const delinquent   = loansEfectivo.filter((l) => l.status === 'En mora').length
-    const cobradoHoy   = receipts.filter((r) => r.paidAt?.slice(0, 10) === today).reduce((s, r) => s + Number(r.amount), 0)
+    const cobradoHoy   = receiptsEfectivo.filter((r) => r.paidAt?.slice(0, 10) === today).reduce((s, r) => s + Number(r.amount), 0)
     const pendingAmount = paymentsEfectivo.filter((p) => ['Pendiente','Vencido','Parcial'].includes(p.status)).reduce((s, p) => s + Number(p.amount), 0)
     const mesActual    = monthBars[11] ?? 0
     const mesAnterior  = monthBars[10] ?? 0
     const cambioMes    = mesAnterior > 0 ? ((mesActual - mesAnterior) / mesAnterior * 100).toFixed(1) : null
     return { principal, returnTotal, interest: returnTotal - principal, caja, delinquency: loansEfectivo.length ? (delinquent / loansEfectivo.length) * 100 : 0, cobradoHoy, pendingAmount, cambioMes }
-  }, [loansEfectivo, paymentsEfectivo, ledgerEfectivo, receipts, monthBars])
+  }, [loansEfectivo, paymentsEfectivo, ledgerEfectivo, receiptsEfectivo, monthBars])
 
   /* ── Totales — módulo Ventas (solo ventas) ── */
   const totalsVentas = useMemo(() => {
-    const caja = ledgerVentas.reduce((s, m) => s + (m.type === 'Entrada' ? m.amount : -m.amount), 0)
+    const caja = ledgerVentas.filter(m => !m.voided).reduce((s, m) => s + (m.type === 'Entrada' ? m.amount : -m.amount), 0)
     return { ...totals, caja }
   }, [totals, ledgerVentas])
 
@@ -1197,19 +1209,22 @@ export default function App() {
   const handleSignOut = async () => {
     try {
       await supabaseSignOut()
+      dataLoadVersion.current += 1
       setLoans([]); setPayments([]); setLedger([]); setReceipts([])
       setAllLoans([]); setMonthBars(Array(12).fill(0))
+      setProductos([]); setVentas([]); setRutaUnificada([]); setPapelera([])
       setModo(null); setTab('dashboard'); setModal(null); setDataError(null)
       try { localStorage.removeItem('pn-modo') } catch { /* El almacenamiento puede estar deshabilitado. */ }
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const handlePay = async (payment, status, amount = payment.amount) => {
-    if (!user) { showToast('Debes iniciar sesión', 'error'); return }
-    if (status !== 'Pagado' && status !== 'Parcial') return
+    if (!user) { showToast('Debes iniciar sesión', 'error'); return false }
+    if (status !== 'Pagado' && status !== 'Parcial') return false
     const importeNum = Number(amount)
-    if (!Number.isFinite(importeNum) || importeNum <= 0) { showToast('El importe debe ser mayor a cero.', 'error'); return }
-    if (paymentLocks.current.has(payment.id)) return
+    if (!Number.isFinite(importeNum) || importeNum <= 0) { showToast('El importe debe ser mayor a cero.', 'error'); return false }
+    if (importeNum > Number(payment.amount) + 0.005) { showToast('El importe supera el saldo pendiente de la cuota.', 'error'); return false }
+    if (paymentLocks.current.has(payment.id)) return false
     paymentLocks.current.add(payment.id)
     try {
       const pago = await registrarPago(payment, importeNum)
@@ -1220,7 +1235,7 @@ export default function App() {
         if (finalStatus === 'Pagado') return null
         return { ...p, status: 'Parcial', amount: Math.max(0, Number(p.amount) - importeNum) }
       }).filter(Boolean))
-      setReceipts((prev) => [{ id: pago.referencia, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt: new Date().toISOString(), status: 'Pagado', n: payment.n, method: 'efectivo' }, ...prev])
+      setReceipts((prev) => [{ id: pago.referencia, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt: new Date().toISOString(), status: 'Pagado', n: payment.n, method: 'efectivo', origen: payment.origen ?? 'efectivo' }, ...prev])
       setLedger((prev) => [{ id: pago.movimientoCajaId ?? pago.referencia, label: `Cobro · ${payment.client}`, type: 'Entrada', amount: importeNum, time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), rawDate: new Date().toISOString(), origen: (payment.origen ?? 'efectivo') }, ...prev])
       const paidIncrement = finalStatus === 'Pagado' ? 1 : 0
       const advanceLoan = (loan) => {
@@ -1236,7 +1251,8 @@ export default function App() {
       setLoans((prev) => prev.map(advanceLoan))
       setAllLoans((prev) => prev.map(advanceLoan))
       showToast(finalStatus === 'Pagado' ? `✓ Pago registrado · Recibo ${pago.referencia}` : 'Pago parcial registrado')
-    } catch (err) { showToast(`No se pudo registrar: ${err.message}`, 'error') }
+      return true
+    } catch (err) { showToast(`No se pudo registrar: ${err.message}`, 'error'); return false }
     finally { paymentLocks.current.delete(payment.id) }
   }
 
@@ -1414,7 +1430,7 @@ export default function App() {
       if (origen === 'ventas') {
         const ventasCliente = ventas.filter(v => v.clienteId === cliente.clienteId)
         const refs = ventasCliente.flatMap(v => [v.referencia, v.prestamo?.referencia]).filter(Boolean)
-        const ledgerCliente = ledgerVentas.filter(m => refs.some(ref => m.label?.includes(ref)))
+        const ledgerCliente = ledgerVentas.filter(m => !m.voided && refs.some(ref => m.label?.includes(ref)))
         const loansCliente = allLoans.filter(l => ventasCliente.some(v => v.prestamo?.referencia === l.id))
         const paymentsCliente = payments.filter(p => ventasCliente.some(v => v.prestamo?.referencia === p.loanId))
         const { exportReportDocxVentas } = await import('./utils/reportDocx')
@@ -1423,7 +1439,7 @@ export default function App() {
         const loansCliente = allLoansEfectivo.filter(l => l.clienteId === cliente.clienteId || l.client === cliente.client)
         const paysCliente = paymentsEfectivo.filter(p => p.client === cliente.client)
         const loanRefs = loansCliente.map(l => l.id).filter(Boolean)
-        const ledgerCliente = ledgerEfectivo.filter(m => loanRefs.some(ref => m.label?.includes(ref)))
+        const ledgerCliente = ledgerEfectivo.filter(m => !m.voided && loanRefs.some(ref => m.label?.includes(ref)))
         const { exportReportDocxPrestamos } = await import('./utils/reportDocx')
         await exportReportDocxPrestamos({ loans: loansCliente, payments: paysCliente, ledger: ledgerCliente, titulo: `Ficha de ${cliente.client}` })
       }
@@ -1434,7 +1450,7 @@ export default function App() {
   const handleExportVentaDocx = async (venta) => {
     try {
       const refs = [venta.referencia, venta.prestamo?.referencia].filter(Boolean)
-      const ledgerVenta = ledgerVentas.filter(m => refs.some(ref => m.label?.includes(ref)))
+      const ledgerVenta = ledgerVentas.filter(m => !m.voided && refs.some(ref => m.label?.includes(ref)))
       const loansVenta = allLoans.filter(l => l.id === venta.prestamo?.referencia)
       const paymentsVenta = payments.filter(p => p.loanId === venta.prestamo?.referencia)
       const { exportReportDocxVentas } = await import('./utils/reportDocx')
@@ -1446,9 +1462,9 @@ export default function App() {
   /* Cargar papelera cuando cambia el modo */
   useEffect(() => {
     if (user && modo) {
-      cargarPapelera(user.id).then(setPapelera).catch(() => {})
+      cargarPapelera(user.id).then(setPapelera).catch(err => showToast(`No se pudo cargar la papelera: ${err.message}`, 'error'))
     }
-  }, [user, modo])
+  }, [user, modo, showToast])
 
   const handleExportComprobanteDocx = async (loan, cuotas, modoExport, nCuota) => {
     try {
@@ -1504,7 +1520,7 @@ export default function App() {
       const ventasF  = alcance === 'cliente'
         ? ventas.filter(v => v.client === clienteFiltro)
         : ventas
-      const ledgerF  = ledgerVentas.filter(m => enRango(m.rawDate))
+      const ledgerF  = ledgerVentas.filter(m => !m.voided && enRango(m.rawDate))
       const titulo   = alcance === 'cliente' ? `Cliente: ${clienteFiltro}` : desde || hasta ? `Del ${desde ?? '—'} al ${hasta ?? '—'}` : 'Reporte de Ventas'
       try {
         if (formato === 'excel') {
@@ -1521,8 +1537,8 @@ export default function App() {
       // ── Reporte de PRÉSTAMOS ──
       const loansF    = alcance === 'cliente' ? loansEfectivo.filter(l => l.client === clienteFiltro) : loansEfectivo
       const paymentsF = alcance === 'cliente' ? paymentsEfectivo.filter(p => p.client === clienteFiltro) : paymentsEfectivo
-      const ledgerF   = ledgerEfectivo.filter(m => enRango(m.rawDate))
-      const receiptsF = receipts.filter(r => enRango(r.paidAt) && (alcance !== 'cliente' || r.client === clienteFiltro))
+      const ledgerF   = ledgerEfectivo.filter(m => !m.voided && enRango(m.rawDate))
+      const receiptsF = receiptsEfectivo.filter(r => enRango(r.paidAt) && (alcance !== 'cliente' || r.client === clienteFiltro))
       const titulo    = alcance === 'cliente' ? `Cliente: ${clienteFiltro}` : desde || hasta ? `Del ${desde ?? '—'} al ${hasta ?? '—'}` : 'Reporte de Préstamos'
       try {
         if (formato === 'excel') {
@@ -1536,7 +1552,7 @@ export default function App() {
         }
       } catch (err) { showToast(`Error al generar reporte: ${err.message}`, 'error') }
     }
-  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receipts, showToast])
+  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receiptsEfectivo, showToast])
 
   /* ── Auth screens ── */
   if (!authReady) return (
@@ -1654,7 +1670,7 @@ export default function App() {
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} loading={loading} onPay={handlePay} onPartial={setPartialTarget} />}
               {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={handlePay} onPartial={setPartialTarget} payments={paymentsEfectivo} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
-              {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} mode="prestamos" payments={paymentsEfectivo} />}
+              {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} />}
 
               {/* ── MÓDULO VENTAS ── */}
               {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} totals={totalsVentas} loading={loading} go={setTab} />}
@@ -1663,7 +1679,7 @@ export default function App() {
               {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} />}
               {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onArchive={handleArchivarCliente} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
               {tab === 'v_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
-              {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
+              {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
 
             </motion.div>
           </AnimatePresence>
@@ -1708,13 +1724,22 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {partialTarget && <PartialModal payment={partialTarget} onClose={() => setPartialTarget(null)} onConfirm={(amt) => { handlePay(partialTarget, 'Parcial', amt); setPartialTarget(null) }} />}
+        {partialTarget && <PartialModal payment={partialTarget} onClose={() => setPartialTarget(null)} onConfirm={async (amt) => {
+          const saved = await handlePay(partialTarget, 'Parcial', amt)
+          if (saved) setPartialTarget(null)
+          return saved
+        }} />}
       </AnimatePresence>
       <AnimatePresence>
         {editTarget && <EditClientModal client={editTarget} onClose={() => setEditTarget(null)} onSave={handleEditClient} />}
       </AnimatePresence>
       <AnimatePresence>
-        {cmdOpen && <CommandPalette loans={loansEfectivo} payments={paymentsEfectivo} onClose={() => setCmdOpen(false)} onNavigate={(t) => setTab(t)} />}
+        {cmdOpen && <CommandPalette
+          mode={modo}
+          loans={modo === 'ventas' ? allLoans.filter(l => l.origen === 'venta') : loansEfectivo}
+          payments={modo === 'ventas' ? payments.filter(p => p.origen === 'venta') : paymentsEfectivo}
+          onClose={() => setCmdOpen(false)} onNavigate={(t) => setTab(t)}
+        />}
       </AnimatePresence>
       <AnimatePresence>
         {tourOpen && (
@@ -2320,13 +2345,44 @@ function Alerts({ alerts, loans, loading, onPay }) {
 /* ═══════════════════════════════════════════════
    CAJA — tabla plana con búsqueda y filtros
 ═══════════════════════════════════════════════ */
-function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'prestamos', ventas = [], payments = [] }) {
+function VoidCashModal({ count, bulk, mode, onClose, onConfirm }) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const label = bulk ? `${count} movimientos` : 'este movimiento'
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!reason.trim() || saving) return
+    setSaving(true)
+    try {
+      if (await onConfirm(reason.trim())) onClose()
+    } finally { setSaving(false) }
+  }
+
+  return createPortal(
+    <motion.div className="modal-backdrop" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onMouseDown={e => e.target === e.currentTarget && !saving && onClose()}>
+      <motion.form className="loan-modal pn-void-cash-modal" onSubmit={submit}
+        initial={{ opacity:0, y:16, scale:.98 }} animate={{ opacity:1, y:0, scale:1 }} exit={{ opacity:0, y:10, scale:.98 }}>
+        <div className="modal-header"><ArchiveRestore size={18} color="#ffb76b"/><span>Anular movimiento</span><button type="button" className="icon-button" style={{marginLeft:'auto'}} onClick={onClose} disabled={saving} aria-label="Cerrar"><X size={16}/></button></div>
+        <div className="modal-body">
+          <p className="pn-void-cash-copy">Vas a anular <b>{label}</b> de {mode === 'ventas' ? 'Caja de ventas' : 'Caja de préstamos'}. Quedará en el historial y podrás restaurarlo; el pago y la cuota asociados no se borran.</p>
+          <label className="field"><span>Motivo de la anulación</span><textarea className="field-input pn-void-cash-reason" value={reason} onChange={e=>setReason(e.target.value)} placeholder="Ej.: importe cargado por error" maxLength={180} required autoFocus/></label>
+        </div>
+        <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="pn-btn-danger" disabled={saving || !reason.trim()}>{saving ? <Spinner size={14}/> : <ArchiveRestore size={14}/>} Confirmar anulación</button></div>
+      </motion.form>
+    </motion.div>,
+    document.body,
+  )
+}
+
+function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreMovement, mode = 'prestamos', ventas = [], payments = [] }) {
   const [q,          setQ]     = useState('')
   const [filtro,     setFiltro]= useState('Todos')
   const [busyIds, setBusyIds] = useState([])
+  const [voidTarget, setVoidTarget] = useState(null)
 
-  const entradas = ledger.filter(x => x.type === 'Entrada').reduce((s,x) => s+x.amount, 0)
-  const salidas  = ledger.filter(x => x.type === 'Salida').reduce((s,x) => s+x.amount, 0)
+  const entradas = ledger.filter(x => !x.voided && x.type === 'Entrada').reduce((s,x) => s+x.amount, 0)
+  const salidas  = ledger.filter(x => !x.voided && x.type === 'Salida').reduce((s,x) => s+x.amount, 0)
   const balance  = entradas - salidas
   const capitalColocado = mode === 'ventas'
     ? ventas.reduce((sum, v) => sum + Number(v.montoFinanciado ?? 0), 0)
@@ -2348,22 +2404,15 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'pr
   }, [payments])
 
   const visible = useMemo(() => ledger.filter(m => {
-    const okTipo = filtro === 'Todos' || m.type === filtro
+    const okTipo = filtro === 'Todos' ? !m.voided : filtro === 'Anulados' ? m.voided : !m.voided && m.type === filtro
     const okQ    = !q.trim() || m.label.toLowerCase().includes(q.toLowerCase())
     return okTipo && okQ
   }), [ledger, filtro, q])
 
-  const deleteMovements = async (rows, bulk = false) => {
+  const requestVoid = (rows, bulk = false) => {
     const ids = rows.map(row => row.id).filter(Boolean)
-    if (!ids.length) return
-    const scope = mode === 'ventas' ? 'de ventas' : 'de préstamos'
-    const message = bulk
-      ? `¿Limpiar todos los movimientos ${scope} de Caja?\n\nEsto solo elimina las filas del registro de Caja. Los cobros, cuotas y préstamos guardados no se anulan.`
-      : `¿Quitar este movimiento de Caja?\n\nEl cobro, la cuota o el préstamo asociado seguirá registrado.`
-    if (!window.confirm(message)) return
-    setBusyIds(ids)
-    await onDeleteMovements?.(ids, { bulk, mode })
-    setBusyIds([])
+    if (!bulk && !ids.length) return
+    setVoidTarget({ ids, bulk, count: bulk ? ledger.filter(m=>!m.voided).length : ids.length })
   }
 
   return (
@@ -2421,13 +2470,13 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'pr
       <div className="pn-toolbar">
         <label className="pn-searchbox"><Search size={14}/><input placeholder="Buscar movimiento…" value={q} onChange={e=>setQ(e.target.value)}/></label>
         <div className="pn-filter-pills">
-          {['Todos','Entrada','Salida'].map(f => (
+          {['Todos','Entrada','Salida','Anulados'].map(f => (
             <button key={f} className={`pn-pill ${filtro===f?'pn-pill-active':''}`} onClick={()=>setFiltro(f)}>{f}</button>
           ))}
         </div>
         <span className="pn-count">{visible.length} mov.</span>
-        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={!ledger.length || busyIds.length > 0} onClick={() => deleteMovements(ledger, true)}>
-          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <Trash2 size={14}/>} Limpiar movimientos
+        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={!ledger.some(m => !m.voided) || busyIds.length > 0} onClick={() => requestVoid([], true)}>
+          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <ArchiveRestore size={14}/>} Anular movimientos
         </button>
       </div>
 
@@ -2446,11 +2495,12 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'pr
                   <thead><tr><th>DESCRIPCIÓN</th><th>TIPO</th><th>IMPORTE</th><th>FECHA / HORA</th><th>ACCIÓN</th></tr></thead>
                   <tbody>
                     {visible.map((m, i) => (
-                      <motion.tr key={m.id} className={`pn-cash-row pn-cash-row-${m.type === 'Entrada' ? 'entrada' : 'salida'}`}
+                      <motion.tr key={m.id} className={`pn-cash-row pn-cash-row-${m.type === 'Entrada' ? 'entrada' : 'salida'} ${m.voided ? 'pn-cash-row-voided' : ''}`}
                         initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:.1+i*.02 }}>
                         <td className="pn-td-main">
                           <span className={`pn-cash-dot ${m.type==='Entrada'?'dot-green':'dot-red'}`}/>
                           {m.label}
+                          {m.voided && <small className="pn-cash-void-note">ANULADO · {m.voidReason || 'Sin motivo'}</small>}
                         </td>
                         <td>
                           <span className={`pn-tipo-chip ${m.type==='Entrada'?'pn-tipo-green':'pn-tipo-red'}`}>
@@ -2462,9 +2512,13 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'pr
                         </td>
                         <td className="pn-td-muted">{m.time}</td>
                         <td>
-                          <button className="pn-btn-icon pn-btn-danger-icon pn-cash-delete" type="button" title="Quitar movimiento de Caja" aria-label={`Quitar movimiento: ${m.label}`} disabled={busyIds.includes(m.id)} onClick={() => deleteMovements([m])}>
-                            {busyIds.includes(m.id) ? <Loader2 size={13} className="pn-spin"/> : <Trash2 size={13}/>}
-                          </button>
+                          {m.voided
+                            ? <button className="pn-btn-icon pn-cash-restore" type="button" title="Restaurar movimiento" aria-label={`Restaurar movimiento: ${m.label}`} disabled={busyIds.includes(m.id)} onClick={async () => { setBusyIds([m.id]); await onRestoreMovement?.(m.id); setBusyIds([]) }}>
+                                {busyIds.includes(m.id) ? <Loader2 size={13} className="pn-spin"/> : <ArchiveRestore size={13}/>}
+                              </button>
+                            : <button className="pn-btn-icon pn-btn-danger-icon pn-cash-delete" type="button" title="Anular movimiento" aria-label={`Anular movimiento: ${m.label}`} disabled={busyIds.includes(m.id)} onClick={() => requestVoid([m])}>
+                                {busyIds.includes(m.id) ? <Loader2 size={13} className="pn-spin"/> : <Trash2 size={13}/>}
+                              </button>}
                         </td>
                       </motion.tr>
                     ))}
@@ -2473,6 +2527,16 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'pr
               </div>
             </motion.div>
       }
+      <AnimatePresence>
+        {voidTarget && <VoidCashModal count={voidTarget.count} bulk={voidTarget.bulk} mode={mode}
+          onClose={() => setVoidTarget(null)}
+          onConfirm={async reason => {
+            const ids = voidTarget.bulk ? [] : voidTarget.ids
+            setBusyIds(ids)
+            try { return await onDeleteMovements?.(ids, { bulk:voidTarget.bulk, mode, reason }) }
+            finally { setBusyIds([]) }
+          }} />}
+      </AnimatePresence>
     </div>
   )
 }
