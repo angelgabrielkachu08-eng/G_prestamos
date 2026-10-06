@@ -5828,6 +5828,101 @@ html[data-performance-mode="on"] .pn-performance-on .performance-mode-toggle { t
 .legal-notice svg { flex:0 0 auto;margin-top:1px; }
 .legal-updated { padding-top:13px;border-top:1px solid rgba(255,255,255,.07);font-size:11px!important;color:#808594!important; }
 .vc-quota-warning { display:flex;align-items:flex-start;gap:10px;padding:16px 18px;border-top:1px solid rgba(255,180,80,.16);background:rgba(255,180,80,.055);color:#ffd58d;font-size:13px;line-height:1.55; }
+
+/* Rendimiento desde el acceso: conservar la paleta y quitar el brillo intenso. */
+html[data-performance-mode="on"] .lv2-root {
+  background:#08090e!important;
+}
+html[data-performance-mode="on"] .lv2-word-green,
+html[data-performance-mode="on"] .lv2-word-purple {
+  text-shadow:none!important;
+}
+html[data-performance-mode="on"] .lv2-card,
+html[data-performance-mode="on"] .lv2-brand-icon,
+html[data-performance-mode="on"] .lv2-google-btn {
+  box-shadow:0 18px 50px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.05)!important;
+}
+html[data-performance-mode="on"] .lv2-neon-left,
+html[data-performance-mode="on"] .lv2-neon-right {
+  opacity:.12!important;
+  box-shadow:none!important;
+}
+html[data-performance-mode="on"] .lv2-orb-green,
+html[data-performance-mode="on"] .lv2-orb-purple {
+  opacity:.12!important;
+  filter:none!important;
+}
+
+/* En móvil, las dos opciones de gestión quedan visibles en paralelo. */
+@media(max-width:640px) {
+  .ms2-root {
+    justify-content:center;
+    gap:clamp(10px,2.2vh,18px);
+    padding:calc(env(safe-area-inset-top) + 48px) 12px calc(env(safe-area-inset-bottom) + 10px);
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+  .ms2-header { gap:8px; }
+  .ms2-logo { gap:7px; }
+  .ms2-logo-icon { width:34px;height:34px;border-radius:10px; }
+  .ms2-logo-icon svg { width:18px;height:18px; }
+  .ms2-logo-name { font-size:18px; }
+  .ms2-title { font-size:clamp(21px,6vw,26px);line-height:1.12; }
+  .ms2-subtitle { font-size:11px; }
+  .ms2-title-block .help-btn { transform:scale(.82);transform-origin:center; }
+  .ms2-cards {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    flex-direction:initial;
+    gap:9px;
+    max-width:440px;
+    perspective:none;
+  }
+  .ms2-card {
+    min-width:0;
+    min-height:0;
+    padding:14px 10px 11px;
+    gap:8px;
+    border-radius:15px;
+    backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+  }
+  .ms2-card-border { border-radius:15px; }
+  .ms2-card-icon { width:38px;height:38px;border-radius:11px; }
+  .ms2-card-icon svg { width:20px;height:20px; }
+  .ms2-card-title { margin:0 0 3px;font-size:17px;line-height:1.1; }
+  .ms2-card-sub { font-size:10px!important;line-height:1.3; }
+  .ms2-card-list { gap:5px;margin:8px 0 0; }
+  .ms2-card-list li { align-items:flex-start;gap:4px;font-size:9px!important;line-height:1.25; }
+  .ms2-check { width:13px;height:13px;flex:0 0 13px; }
+  .ms2-check svg { width:8px;height:8px; }
+  .ms2-card-cta { justify-content:center;gap:5px;margin-top:auto;padding:7px 8px;border-radius:9px;font-size:11px; }
+  .ms2-card-cta svg { width:13px;height:13px; }
+  .ms2-footer { font-size:9px; }
+  .ms2-root > .legal-links { gap:5px 11px;margin:0 0 3px; }
+  .ms2-root > .legal-links button,.ms2-root > .legal-links a { font-size:9px; }
+  .performance-mode-floating {
+    top:max(7px,env(safe-area-inset-top));
+    right:max(7px,env(safe-area-inset-right));
+    min-height:29px;
+    gap:4px;
+    padding:5px 7px;
+    font-size:9px;
+    border-radius:9px;
+  }
+  .performance-mode-floating svg { width:13px;height:13px; }
+  .performance-mode-floating small { padding:2px 4px;font-size:8px; }
+}
+
+@media(max-width:360px) {
+  .ms2-root { gap:9px;padding-inline:8px; }
+  .ms2-cards { gap:7px; }
+  .ms2-card { padding:11px 7px 9px;gap:7px; }
+  .ms2-card-title { font-size:15px; }
+  .ms2-card-sub { font-size:9px!important; }
+  .ms2-card-list li { font-size:8px!important; }
+  .ms2-card-cta { padding:6px 5px;font-size:10px; }
+}
 .vc-quota-warning svg { flex:0 0 auto;margin-top:1px; }
 
 /* Alta de préstamo: formulario, cuotas y acción visibles en una sola vista. */
