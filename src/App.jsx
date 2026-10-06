@@ -1203,7 +1203,19 @@ export default function App() {
       }).filter(Boolean))
       setReceipts((prev) => [{ id: pago.referencia, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt: new Date().toISOString(), status: 'Pagado', n: payment.n, method: 'efectivo' }, ...prev])
       setLedger((prev) => [{ id: pago.referencia, label: `Cobro · ${payment.client}`, type: 'Entrada', amount: importeNum, time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), rawDate: new Date().toISOString(), origen: (payment.origen ?? 'efectivo') }, ...prev])
-      if (finalStatus === 'Pagado') setLoans((prev) => prev.map((l) => l.id === payment.loanId ? { ...l, paid: l.paid + 1 } : l))
+      const paidIncrement = finalStatus === 'Pagado' ? 1 : 0
+      const advanceLoan = (loan) => {
+        if (loan.id !== payment.loanId) return loan
+        const paid = Math.min(Number(loan.installments) || Number.MAX_SAFE_INTEGER, (Number(loan.paid) || 0) + paidIncrement)
+        return {
+          ...loan,
+          paid,
+          totalRecuperado: (Number(loan.totalRecuperado) || 0) + importeNum,
+          status: paidIncrement && paid >= Number(loan.installments) ? 'Pagado' : loan.status,
+        }
+      }
+      setLoans((prev) => prev.map(advanceLoan))
+      setAllLoans((prev) => prev.map(advanceLoan))
       showToast(finalStatus === 'Pagado' ? `✓ Pago registrado · Recibo ${pago.referencia}` : 'Pago parcial registrado')
     } catch (err) { showToast(`No se pudo registrar: ${err.message}`, 'error') }
   }
