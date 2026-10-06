@@ -17,7 +17,6 @@ const dd = (d) => { try { return d ? new Date(d).toLocaleDateString('es-AR', { d
 
 /* ─── Estilos ─────────────────────────────────────────────── */
 const FONT_BASE  = { name:'Calibri', sz:10, color:{ rgb:'E8E9ED' } }
-const FONT_BOLD  = { ...FONT_BASE, bold:true }
 const FONT_MUTED = { ...FONT_BASE, color:{ rgb:'9297A2' } }
 const FONT_GREEN = { ...FONT_BASE, bold:true, color:{ rgb:'4ADE80' } }
 const FONT_RED   = { ...FONT_BASE, bold:true, color:{ rgb:'EF4444' } }
@@ -43,7 +42,6 @@ const S_ODD      = { fill:BG_ODD,   font:FONT_BASE,  border:BORDERS, alignment:A
 const S_GREEN    = (ri) => ({ fill: ri%2===0 ? BG_EVEN : BG_ODD, font:FONT_GREEN,  border:BORDERS, alignment:ALIGN_R })
 const S_RED      = (ri) => ({ fill: ri%2===0 ? BG_EVEN : BG_ODD, font:FONT_RED,    border:BORDERS, alignment:ALIGN_R })
 const S_PURPLE   = (ri) => ({ fill: ri%2===0 ? BG_EVEN : BG_ODD, font:FONT_PURPLE, border:BORDERS, alignment:ALIGN_L })
-const S_AMBER    = (ri) => ({ fill: ri%2===0 ? BG_EVEN : BG_ODD, font:FONT_AMBER,  border:BORDERS, alignment:ALIGN_R })
 const S_MUTED    = (ri) => ({ fill: ri%2===0 ? BG_EVEN : BG_ODD, font:FONT_MUTED,  border:BORDERS, alignment:ALIGN_L })
 
 function sc(ws, ref, style) {
@@ -117,7 +115,7 @@ function sheetResumenPrestamos(loans, ledger, receipts, { desde, hasta, titulo }
 
   // cabecera estado cartera
   setRow(ws, 13, [0,1,2], S_HEADER)
-  ;[14,15,16,17].forEach((r,i) => {
+  ;[14,15,16,17].forEach((r) => {
     const f = r===15 ? FONT_RED : FONT_BASE
     sc(ws, XLSX.utils.encode_cell({r,c:0}), { fill:r%2===0?BG_EVEN:BG_ODD, font:FONT_MUTED, border:BORDERS })
     sc(ws, XLSX.utils.encode_cell({r,c:1}), { fill:r%2===0?BG_EVEN:BG_ODD, font:f, border:BORDERS, alignment:ALIGN_R })
@@ -155,7 +153,7 @@ function sheetPrestamos(loans) {
   return ws
 }
 
-function sheetMovimientos(ledger, tipo='Préstamos') {
+function sheetMovimientos(ledger) {
   const headers = ['Descripción','Tipo','Importe','Fecha / Hora']
   const rows = ledger.map(m => [m.label, m.type==='Entrada'?'▲ Entrada':'▼ Salida', $(m.amount), m.time||dt(m.rawDate)])
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
@@ -176,13 +174,13 @@ function sheetMovimientos(ledger, tipo='Préstamos') {
 /**
  * @param {{ loans, payments, ledger, receipts, desde, hasta, titulo }}
  */
-export async function exportReportExcelPrestamos({ loans=[], payments=[], ledger=[], receipts=[], desde=null, hasta=null, titulo='Reporte de Préstamos' }={}) {
+export async function exportReportExcelPrestamos({ loans=[], ledger=[], receipts=[], desde=null, hasta=null, titulo='Reporte de Préstamos' }={}) {
   const wb = XLSX.utils.book_new()
   wb.Props = { Title:'PrestaNeo — Préstamos', Author:'PrestaNeo Finance OS', Subject:titulo }
 
   XLSX.utils.book_append_sheet(wb, sheetResumenPrestamos(loans, ledger, receipts, { desde, hasta, titulo }), 'Resumen')
   XLSX.utils.book_append_sheet(wb, sheetPrestamos(loans),             'Préstamos')
-  XLSX.utils.book_append_sheet(wb, sheetMovimientos(ledger,'Préstamos'), 'Movimientos')
+  XLSX.utils.book_append_sheet(wb, sheetMovimientos(ledger), 'Movimientos')
 
   XLSX.writeFile(wb, `prestaneo-prestamos-${new Date().toISOString().slice(0,10)}.xlsx`)
 }
@@ -326,7 +324,7 @@ export async function exportReportExcelVentas({ ventas=[], ledger=[], desde=null
   XLSX.utils.book_append_sheet(wb, sheetVentas(ventas),                'Ventas')
   const det = sheetDetalleVentas(ventas)
   if (det) XLSX.utils.book_append_sheet(wb, det, 'Artículos')
-  XLSX.utils.book_append_sheet(wb, sheetMovimientos(ledger,'Ventas'), 'Movimientos')
+  XLSX.utils.book_append_sheet(wb, sheetMovimientos(ledger), 'Movimientos')
 
   XLSX.writeFile(wb, `prestaneo-ventas-${new Date().toISOString().slice(0,10)}.xlsx`)
 }

@@ -2,26 +2,26 @@
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  Activity, ArrowDownLeft, ArrowUpRight, Bell, BriefcaseBusiness, CalendarDays,
-  Check, CheckCheck, ChevronDown, Command, Download, FileText, Filter, HandCoins,
-  LayoutDashboard, LogOut, MapPin, Menu, MoreHorizontal, Plus, Search, ShieldCheck,
+  Activity, ArrowDownLeft, ArrowUpRight, Bell, BriefcaseBusiness,
+  Check, CheckCheck, ChevronDown, Download, FileText, Filter, HandCoins,
+  LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, Search, ShieldCheck,
   Sparkles, TrendingDown, TrendingUp, Users, Wallet, X, ReceiptText, UserRound,
   MessageCircle, Landmark, CircleAlert, Loader2, AlertTriangle, RefreshCw,
   Phone, Clock, Zap, BarChart3, CreditCard, Edit3, History,
   Calendar, Target, ChevronRight, PieChart, Route, RefreshCcw, Star,
-  HelpCircle, BookOpen, GraduationCap, ChevronLeft,
-  FileSpreadsheet, SlidersHorizontal, ListFilter, ArrowRight,
-  ShoppingCart, Package, Tag, Store, BadgeDollarSign, Layers,
-  PackagePlus, ShoppingBag, DollarSign, Tv,
+  HelpCircle, GraduationCap, ChevronLeft,
+  FileSpreadsheet, ArrowRight,
+  ShoppingCart, Package, Store, Layers,
+  PackagePlus, ShoppingBag, DollarSign,
   Trash2, ArchiveRestore, FileSignature,
 } from 'lucide-react'
 import { isSupabaseConfigured } from './lib/supabase'
 import { calcularPrestamoDirecto } from './utils/loanCalculator'
 import {
   signInWithGoogle, signOut as supabaseSignOut, getSession, onAuthStateChange,
-  cargarCarteraCompleta, crearPrestamo, registrarPago, calcularAlertas,
+  cargarCarteraCompleta, crearPrestamo, registrarPago,
   buscarClientesPorNombre, actualizarCliente,
-  cargarHistorialPrestamos, calcularProyeccion, cobradoPorMes,
+  cargarHistorialPrestamos, cobradoPorMes,
   // Módulo ventas
   cargarProductos, crearProducto, actualizarProducto, desactivarProducto,
   cargarVentas, crearVentaCredito, cargarCuotasUnificadas,
@@ -29,12 +29,6 @@ import {
   archivarCliente, restaurarCliente, cargarPapelera, cargarFichaCliente, eliminarClientePermanente,
 } from './lib/supabaseService'
 
-const exportReceiptPdf = async (...args) =>
-  (await import('./utils/receiptPdf')).exportReceiptPdf(...args)
-const exportReportDocx  = async (...args) =>
-  (await import('./utils/reportDocx')).exportReportDocx(...args)
-const exportReportExcel = async (...args) =>
-  (await import('./utils/exportReportExcel')).exportReportExcel(...args)
 const exportComprobanteDocx = async (...args) =>
   (await import('./utils/reportDocx')).exportComprobantePrestamoDocx(...args)
 
@@ -1044,7 +1038,6 @@ export default function App() {
   const [receipts, setReceipts]           = useState([])
   const [ledger, setLedger]               = useState([])
   const [monthBars, setMonthBars]         = useState(Array(12).fill(0))
-  const [proyeccion, setProyeccion]       = useState(null) // { totalEsperado, cuotasCount, serie }
   const [modal, setModal]                 = useState(null) // 'loan'|null
   const [partialTarget, setPartialTarget] = useState(null)
   const [editTarget, setEditTarget]       = useState(null) // cliente a editar
@@ -1062,8 +1055,6 @@ export default function App() {
     try { return localStorage.getItem('pn-modo') || null } catch { return null }
   })
   const [papelera, setPapelera]           = useState([])
-  const [query, setQuery]                 = useState('')
-  const [filter, setFilter]               = useState('Todos')
   const [toast, setToast]                 = useState(null)
   const [mobileOpen, setMobileOpen]       = useState(false)
   const [dataError, setDataError]         = useState(null)
@@ -1084,11 +1075,10 @@ export default function App() {
     setLoading(true)
     setDataError(null)
     try {
-      const [cartera, historial, bars, proy, prods, vtas, rutaUni] = await Promise.all([
+      const [cartera, historial, bars, prods, vtas, rutaUni] = await Promise.all([
         cargarCarteraCompleta(uid),
         cargarHistorialPrestamos(uid).catch(() => []),
         cobradoPorMes(uid).catch(() => Array(12).fill(0)),
-        calcularProyeccion(uid, 30).catch(() => null),
         cargarProductos(uid).catch(() => []),
         cargarVentas(uid).catch(() => []),
         cargarCuotasUnificadas(uid).catch(() => []),
@@ -1099,7 +1089,6 @@ export default function App() {
       setReceipts(cartera.receipts)
       setAllLoans(historial)
       setMonthBars(bars)
-      setProyeccion(proy)
       setProductos(prods)
       setVentas(vtas)
       setRutaUnificada(rutaUni)
@@ -1111,6 +1100,8 @@ export default function App() {
     }
   }, [showToast])
 
+  // Sincroniza las colecciones de Supabase cuando cambia la sesión.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (user) loadData(user.id) }, [user, loadData])
 
   /* ── Cmd+K ── */
@@ -1153,17 +1144,15 @@ export default function App() {
     return { ...totals, caja }
   }, [totals, ledgerVentas])
 
-  const alerts = useMemo(() => calcularAlertas(paymentsEfectivo), [paymentsEfectivo])
-
   /* ── Acciones ── */
   const handleSignIn  = async () => { try { await signInWithGoogle() } catch (e) { showToast(e.message, 'error') } }
   const handleSignOut = async () => {
     try {
       await supabaseSignOut()
       setLoans([]); setPayments([]); setLedger([]); setReceipts([])
-      setAllLoans([]); setMonthBars(Array(12).fill(0)); setProyeccion(null)
-      setModo(null); setTab('dashboard'); setQuery(''); setFilter('Todos'); setModal(null); setDataError(null)
-      try { localStorage.removeItem('pn-modo') } catch {}
+      setAllLoans([]); setMonthBars(Array(12).fill(0))
+      setModo(null); setTab('dashboard'); setModal(null); setDataError(null)
+      try { localStorage.removeItem('pn-modo') } catch { /* El almacenamiento puede estar deshabilitado. */ }
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -1213,8 +1202,6 @@ export default function App() {
       showToast(`Cliente ${campos.nombre} actualizado`)
     } catch (err) { showToast(`No se pudo actualizar: ${err.message}`, 'error') }
   }
-
-  const handleExportReceipt = async (payment) => { try { await exportReceiptPdf(payment); showToast('PDF descargado') } catch { showToast('Error al generar PDF', 'error') } }
 
   /* handleCreateVenta — crea venta a crédito y actualiza estado local */
   const handleCreateVenta = async (form) => {
@@ -1300,7 +1287,7 @@ export default function App() {
 
   /* ── Elegir modo: guarda en localStorage ── */
   const elegirModo = (m) => {
-    try { localStorage.setItem('pn-modo', m) } catch {}
+    try { localStorage.setItem('pn-modo', m) } catch { /* La sesión sigue funcionando sin persistencia local. */ }
     setModo(m)
     setTab(m === 'prestamos' ? 'p_inicio' : 'v_inicio')
   }
@@ -1457,10 +1444,7 @@ export default function App() {
         }
       } catch (err) { showToast(`Error al generar reporte: ${err.message}`, 'error') }
     }
-  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receipts])
-
-  const filteredPayments = paymentsEfectivo.filter((p) => (filter === 'Todos' || p.status === filter) && `${p.client} ${p.loanId}`.toLowerCase().includes(query.toLowerCase()))
-  const filteredLoans    = loansEfectivo.filter((l) => `${l.client} ${l.id}`.toLowerCase().includes(query.toLowerCase()))
+  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receipts, showToast])
 
   /* ── Auth screens ── */
   if (!authReady) return (
@@ -1475,8 +1459,6 @@ export default function App() {
   /* ── Selector de modo (primera pantalla tras login) ── */
   if (!modo) return <ModeSelector onSelect={elegirModo} />
 
-  const pendingCount = paymentsEfectivo.filter((p) => p.status === 'Pendiente' || p.status === 'Vencido').length
-  const alertCount   = alerts.length
   const rutaCount    = paymentsEfectivo.filter((p) => daysUntil(p.due) === 0 && (p.status === 'Pendiente' || p.status === 'Parcial')).length
 
   return (
@@ -1493,7 +1475,7 @@ export default function App() {
         </div>
 
         {/* Cambiar modo */}
-        <button className={`modo-switch modo-switch-${modo}`} onClick={() => { setModo(null); try { localStorage.removeItem('pn-modo') } catch {} }}>
+        <button className={`modo-switch modo-switch-${modo}`} onClick={() => { setModo(null); try { localStorage.removeItem('pn-modo') } catch { /* Permite cambiar de modo aunque el almacenamiento esté bloqueado. */ } }}>
           {modo === 'prestamos'
             ? <><ShoppingCart size={13}/> Ir a Ventas</>
             : <><DollarSign size={13}/> Ir a Préstamos</>}
@@ -1575,17 +1557,17 @@ export default function App() {
             <motion.div key={tab} initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }} transition={{ duration:0.18, ease:'easeOut' }}>
 
               {/* ── MÓDULO PRÉSTAMOS ── */}
-              {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} ledger={ledger} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={handlePay} />}
+              {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={handlePay} />}
               {tab === 'p_nuevo'    && <LoanModal inline onClose={() => setTab('p_inicio')} onCreate={handleCreateLoan} userId={user?.id} />}
-              {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} receipts={receipts} loading={loading} onPay={handlePay} onPartial={setPartialTarget} />}
-              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} receipts={receipts} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} payments={paymentsEfectivo} />}
+              {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} loading={loading} onPay={handlePay} onPartial={setPartialTarget} />}
+              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} payments={paymentsEfectivo} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} mode="prestamos" payments={paymentsEfectivo} />}
 
               {/* ── MÓDULO VENTAS ── */}
               {tab === 'v_inicio'   && <VentasInicio ventas={ventas} totals={totals} loading={loading} go={setTab} />}
               {tab === 'v_catalogo' && <Catalogo productos={productos} loading={loading} onCreate={handleCreateProduct} onUpdate={handleUpdateProduct} onDelete={handleDeleteProduct} />}
-              {tab === 'v_nueva'    && <NuevaVenta productos={productos} loading={ventasLoading} userId={user?.id} onSubmit={handleCreateVenta} />}
+              {tab === 'v_nueva'    && <NuevaVenta productos={productos} onSubmit={handleCreateVenta} />}
               {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} />}
               {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
               {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
@@ -1625,7 +1607,6 @@ export default function App() {
             loan={modal.loan}
             onClose={() => setModal(null)}
             onCreate={(form) => { handleCreateLoan(form); setModal(null) }}
-            userId={user?.id}
           />
         )}
       </AnimatePresence>
@@ -1695,7 +1676,9 @@ function Kpi({ label, value, change, icon: Icon, kind = 'purple', foot, loading,
   )
 }
 
-function Dashboard({ totals, loans, payments, ledger, alerts, loading, monthBars, proyeccion, go, onNew, onPay }) {
+// Pantalla anterior conservada como referencia durante la renovación del dashboard.
+// eslint-disable-next-line no-unused-vars
+function Dashboard({ totals, loans, payments, ledger, alerts: _alerts, loading, monthBars, proyeccion, go, onNew, onPay }) {
   const [alertFilter, setAlertFilter] = useState('Todos')
 
   const due = payments
@@ -1713,7 +1696,6 @@ function Dashboard({ totals, loans, payments, ledger, alerts, loading, monthBars
     .slice(0, 5)
 
   /* Barras con datos reales */
-  const maxBar = Math.max(...monthBars, 1)
   const monthLabels = (() => {
     const now = new Date()
     return Array.from({ length: 12 }, (_, i) => {
@@ -1725,7 +1707,6 @@ function Dashboard({ totals, loans, payments, ledger, alerts, loading, monthBars
   /* Donut dinámico */
   const activoCount   = loans.filter((l) => l.status === 'Activo').length
   const moraCount     = loans.filter((l) => l.status === 'En mora').length
-  const vacioCount    = Math.max(0, loans.length - activoCount - moraCount)
   const total         = loans.length || 1
   const pctActivo     = (activoCount / total * 100).toFixed(1)
   const pctMora       = (moraCount   / total * 100).toFixed(1)
@@ -1924,7 +1905,9 @@ function ClientAccordion({ clientName, phone, initials, badge, badgeKind='neutra
 /* ═══════════════════════════════════════════════
    COBRANZAS
 ═══════════════════════════════════════════════ */
-function Collections({ payments, receipts, filter, setFilter, query, setQuery, loading, onPay, onReceipt, showToast, onPartial }) {
+// Pantalla anterior conservada como referencia durante la renovación del módulo.
+// eslint-disable-next-line no-unused-vars
+function Collections({ payments, receipts, filter, setFilter, query, setQuery, loading, onPay, onReceipt, onPartial }) {
   const filters = ['Todos','Pendiente','Vencido','Parcial']
   const pendingTotal  = payments.filter((p) => ['Pendiente','Vencido','Parcial'].includes(p.status)).reduce((s,p) => s+Number(p.amount), 0)
   const cobradoHoy    = receipts.filter((r) => r.paidAt?.slice(0,10) === today).reduce((s,r) => s+Number(r.amount), 0)
@@ -1998,6 +1981,8 @@ function Collections({ payments, receipts, filter, setFilter, query, setQuery, l
 /* ═══════════════════════════════════════════════
    PRÉSTAMOS — con pestaña Historial
 ═══════════════════════════════════════════════ */
+// Pantalla anterior conservada como referencia durante la renovación del módulo.
+// eslint-disable-next-line no-unused-vars
 function Loans({ loans, allLoans, query, setQuery, loading, onNew, onRefinanciar }) {
   const [loanTab, setLoanTab] = useState('activos')
 
@@ -2091,7 +2076,9 @@ function Loans({ loans, allLoans, query, setQuery, loading, onNew, onRefinanciar
 /* ═══════════════════════════════════════════════
    CLIENTES — con botón editar
 ═══════════════════════════════════════════════ */
-function Clients({ loans, allLoans, receipts, loading, onNew, onEdit }) {
+// Pantalla anterior conservada como referencia durante la renovación del módulo.
+// eslint-disable-next-line no-unused-vars
+function Clients({ loans, allLoans, loading, onNew, onEdit }) {
   const grouped = [...new Map(loans.map((l) => [l.client, l])).values()]
 
   // Score calculado desde historial real de pagos
@@ -2179,7 +2166,9 @@ function Clients({ loans, allLoans, receipts, loading, onNew, onEdit }) {
 /* ═══════════════════════════════════════════════
    ALERTAS
 ═══════════════════════════════════════════════ */
-function Alerts({ alerts, payments, loans, loading, onPay }) {
+// Pantalla anterior conservada como referencia durante la renovación del módulo.
+// eslint-disable-next-line no-unused-vars
+function Alerts({ alerts, loans, loading, onPay }) {
   const overdueTotal   = alerts.filter((a) => a.diffDays < 0).reduce((s,a) => s+Number(a.amount), 0)
   const dueTodayTotal  = alerts.filter((a) => a.diffDays === 0).reduce((s,a) => s+Number(a.amount), 0)
   const due48Total     = alerts.filter((a) => a.diffDays > 0 && a.diffDays <= 2).reduce((s,a) => s+Number(a.amount), 0)
@@ -2369,6 +2358,8 @@ function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = 
 /* ═══════════════════════════════════════════════
    COMPROBANTES — grid de recibos por cliente
 ═══════════════════════════════════════════════ */
+// Pantalla anterior conservada como referencia durante la renovación del módulo.
+// eslint-disable-next-line no-unused-vars
 function Receipts({ payments, loading, onReceipt, onExport }) {
   const [q, setQ]       = useState('')
   const [selected, setSel] = useState(null) // cliente seleccionado
@@ -2799,7 +2790,9 @@ function FieldWithError({ label, value, onChange, type = 'text', placeholder, pr
 /* ═══════════════════════════════════════════════════════════════
    ESTADISTICAS — Analytics (legacy, simplified)
 ═══════════════════════════════════════════════════════════════ */
-function Estadisticas({ loans = [], allLoans = [], payments = [], receipts = [], ledger = [], monthBars = [], proyeccion = null, loading = false }) {
+// Pantalla anterior conservada como referencia durante la renovación del módulo.
+// eslint-disable-next-line no-unused-vars
+function Estadisticas({ loans = [], allLoans = [], payments = [], receipts = [], monthBars = [], loading = false }) {
   const metrics = useMemo(() => {
     const todosLoans   = allLoans.length > 0 ? allLoans : loans
     const capitalTotal = todosLoans.reduce((s, l) => s + Number(l.principal || 0), 0)
@@ -2949,12 +2942,17 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
 
   const searchRef = useRef(null)
   useEffect(() => {
-    if (!client || client.length < 2) { setSugs([]); return }
     clearTimeout(searchRef.current)
-    searchRef.current = setTimeout(async () => {
-      try { const r = await buscarClientesPorNombre(userId, client); setSugs(r || []) }
-      catch { setSugs([]) }
-    }, 350)
+    let active = true
+    if (!client || client.length < 2) {
+      searchRef.current = setTimeout(() => { if (active) setSugs([]) }, 0)
+    } else {
+      searchRef.current = setTimeout(async () => {
+        try { const r = await buscarClientesPorNombre(userId, client); if (active) setSugs(r || []) }
+        catch { if (active) setSugs([]) }
+      }, 350)
+    }
+    return () => { active = false; clearTimeout(searchRef.current) }
   }, [client, userId])
 
   function pickSug(c) {
@@ -3300,7 +3298,7 @@ function EditClientModal({ client, onClose, onSave }) {
 /* ═══════════════════════════════════════════════════════════════
    RUTA DIA — ruta de cobro del día
 ═══════════════════════════════════════════════════════════════ */
-function RutaDia({ payments = [], receipts = [], loading = false, onPay, onPartial }) {
+function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
   const cobros = useMemo(() => {
     const pending  = payments.filter(p => p.status !== 'Pagado')
     const overdue  = pending.filter(p => daysUntil(p.due) < 0).sort((a,b) => daysUntil(a.due)-daysUntil(b.due))
@@ -3342,7 +3340,6 @@ function RutaDia({ payments = [], receipts = [], loading = false, onPay, onParti
             const dias    = daysUntil(p.due)
             const vencida = dias < 0
             const esHoy   = dias === 0
-            const esMañana = dias === 1
             const phone   = sanitizePhone(p.phone || '')
             const waMsg   = encodeURIComponent(`Hola ${p.client.split(' ')[0]}, te recordamos que tenés una cuota de ${fmt(p.amount)} que vence ${esHoy?'hoy':p.due}. PrestaNeo.`)
             return (
@@ -3411,7 +3408,6 @@ function RutaDia({ payments = [], receipts = [], loading = false, onPay, onParti
   )
 }
 
-function RutaCobro(props) { return <RutaDia {...props} /> }
 
 /* ═══════════════════════════════════════════════════════════════
    PRODUCTO MODAL
@@ -3580,7 +3576,7 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
 /* ═══════════════════════════════════════════════════════════════
    NUEVA VENTA — formulario multi-paso
 ═══════════════════════════════════════════════════════════════ */
-function NuevaVenta({ productos = [], loading = false, userId, onSubmit }) {
+function NuevaVenta({ productos = [], onSubmit }) {
   const [step,     setStep]    = useState(1)
   const [carrito,  setCarrito] = useState([])   // [{producto, qty}]
   const [client,   setClient]  = useState('')
@@ -3914,7 +3910,6 @@ function VentaAcordeon({ venta, cuotas = [], onPay, onPartial }) {
     cuotas.filter(p => p.loanId === venta.prestamo?.referencia),
     [cuotas, venta]
   )
-  const pagadas    = cuotasVenta.filter(p => p.status === 'Pagado' || Number(p.amount) === 0).length
   const pendientes = cuotasVenta.filter(p => p.status !== 'Pagado' && Number(p.amount) > 0)
   const vencidas   = pendientes.filter(p => p.status === 'Vencido').length
   const progreso   = cuotasVenta.length > 0
@@ -4271,7 +4266,7 @@ function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay
 /* ═══════════════════════════════════════════════════════════════
    REFINANCIAR MODAL
 ═══════════════════════════════════════════════════════════════ */
-function RefinanciarModal({ loan, onClose, onCreate, userId }) {
+function RefinanciarModal({ loan, onClose, onCreate }) {
   const saldoPendiente = useMemo(() => {
     const pagadas = loan.paid || 0
     const total   = loan.installments || 1
@@ -4616,7 +4611,7 @@ function Login({ onSignIn }) {
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES PRESTAMOS
 ═══════════════════════════════════════════════════════════════ */
-function ClientesPrestamos({ loans = [], allLoans = [], receipts = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, payments = [] }) {
+function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, payments = [] }) {
   const [q,        setQ]   = useState('')
   const [selected, setSel] = useState(null)
 
@@ -4953,7 +4948,7 @@ function PapeleraClientes({ papelera = [], onRestaurar, onEliminar, onExport }) 
 /* ═══════════════════════════════════════════════════════════════
    PRESTAMOS INICIO
 ═══════════════════════════════════════════════════════════════ */
-function PrestamosInicio({ totals = {}, loans = [], payments = [], ledger = [], monthBars = [], loading = false, go, onNew, onPay }) {
+function PrestamosInicio({ totals = {}, loans = [], payments = [], monthBars = [], loading = false, go, onNew, onPay }) {
   const urgentes = useMemo(() =>
     payments.filter(p => (daysUntil(p.due) <= 0 || p.status === 'Vencido') && p.status !== 'Pagado').slice(0, 4),
     [payments]

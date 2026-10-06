@@ -12,12 +12,6 @@ const today = () => new Date().toISOString().slice(0, 10)
    Helpers internos
 ───────────────────────────────────────────── */
 
-/** Lanza el error de Supabase como excepción nativa para que los llamadores puedan hacer catch. */
-function assertOk({ error, data }) {
-  if (error) throw new Error(error.message || 'Error desconocido de base de datos')
-  return data
-}
-
 /* ─────────────────────────────────────────────
    AUTH
 ───────────────────────────────────────────── */

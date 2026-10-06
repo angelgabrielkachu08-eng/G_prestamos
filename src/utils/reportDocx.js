@@ -331,7 +331,7 @@ export async function exportReportDocxPrestamos({ loans = [], payments = [], led
         pendientes.length > 0
           ? makeTable(
               ['Cliente', 'Préstamo', 'N° Cuota', 'Vence', 'Importe', 'Estado'],
-              pendientes.slice(0, 50).map((p, ri) => [
+              pendientes.slice(0, 50).map((p) => [
                 [p.client,                    P.text],
                 [p.loanId,                    P.muted],
                 [`Cuota ${p.n}`,              P.muted],
@@ -423,7 +423,7 @@ export async function exportReportDocxVentas({ ventas = [], ledger = [], titulo 
           items.length > 0
             ? makeTable(
                 ['Artículo', 'Categoría', 'Cant.', 'Precio unit.', 'Subtotal'],
-                items.map((it, ri) => [
+                items.map((it) => [
                   [it.nombre,             P.text],
                   [it.categoria ?? '—',  P.muted],
                   [String(it.cantidad),   P.text],
