@@ -4775,19 +4775,19 @@ const LEGAL_SECTIONS = {
       ['Crédito para consumo', 'La información y los reportes de esta aplicación no son por sí solos un contrato de crédito al consumo. Cuando corresponda, el documento de la operación debe incluir de forma clara los datos exigidos por el artículo 36 de la Ley 24.240, entre ellos precio de contado, anticipo y monto financiado, tasa efectiva anual, intereses o costo financiero total, sistema de amortización, cantidad/frecuencia/importe de pagos y cargos adicionales. La tasa total ingresada en la aplicación no sustituye automáticamente esos datos.'],
       ['Disponibilidad y seguridad', 'Se aplican controles de acceso y medidas razonables para proteger la cuenta. El servicio puede requerir mantenimiento o depender de proveedores externos de autenticación, base de datos y alojamiento. Conservá comprobantes fuera de la aplicación y no compartas tus credenciales.'],
       ['Derechos de consumidores', 'Estos términos no limitan derechos irrenunciables reconocidos por la normativa argentina. Cuando una operación concreta constituya una relación de consumo o una contratación a distancia, rigen las protecciones legales aplicables y la información particular de esa operación.'],
-      ['Responsable y contacto', 'Responsable/operador: [COMPLETAR NOMBRE O RAZÓN SOCIAL]. Domicilio: [COMPLETAR DOMICILIO LEGAL]. Atención y reclamos: 3765004174. Estos campos deben completarse antes de publicar la aplicación para terceros.'],
+      ['Responsable y contacto', 'Responsable/operador: Kachuka Ángel Gabriel. Domicilio informado: Posadas, Misiones, Argentina. Atención y reclamos: 3765004174. Correo: angelgabrelkachu08@gmail.com.'],
     ],
   },
   privacy: {
     label: 'Privacidad', title: 'Política de privacidad',
     sections: [
-      ['Quién trata los datos', 'El operador identificado en estos términos administra la cuenta y determina para qué utiliza los datos de sus clientes. PrestaNeo funciona como herramienta de gestión. La identidad legal y el domicilio del responsable están pendientes de completar por el operador: [COMPLETAR NOMBRE/RAZÓN SOCIAL Y DOMICILIO].'],
+      ['Quién trata los datos', 'El operador identificado en estos términos administra la cuenta y determina para qué utiliza los datos de sus clientes. PrestaNeo funciona como herramienta de gestión. Responsable informado: Kachuka Ángel Gabriel, con domicilio en Posadas, Misiones, Argentina.'],
       ['Datos y finalidades', 'La aplicación puede tratar datos de acceso (correo y perfil de Google), datos que el operador carga sobre clientes (nombre, teléfono, DNI, domicilio), productos, ventas, préstamos, cuotas, pagos, reportes y movimientos de caja. Se usan para autenticar al operador, administrar las operaciones, emitir comprobantes y responder consultas o reclamos. No se utilizan para publicidad comportamental.'],
       ['Proveedores y almacenamiento', 'La autenticación usa Google y los datos de la aplicación se almacenan en Supabase, según la configuración del proyecto. El proveedor de alojamiento de la versión publicada también puede procesar datos técnicos de conexión. Estos proveedores pueden alojar o procesar información en otras jurisdicciones; el operador debe verificar región, contratos y medidas de transferencia antes de producción. No se venden datos personales.'],
       ['Conservación y seguridad', 'Los datos se conservan mientras sean necesarios para gestionar la cuenta y las operaciones, y por los plazos legales o contractuales que correspondan. Se aplican controles de acceso por usuario y medidas técnicas razonables. Ningún sistema conectado a Internet puede garantizar riesgo cero.'],
-      ['Derechos de las personas', 'Podés solicitar acceso, rectificación, actualización o supresión de tus datos y consultar su finalidad y destinatarios. Contactá al responsable por WhatsApp o teléfono al 3765004174 e indicá qué derecho querés ejercer; se podrá pedir información razonable para verificar identidad. La supresión puede tener límites cuando deban conservarse datos por obligaciones legales o derechos de terceros.'],
+      ['Derechos de las personas', 'Podés solicitar acceso, rectificación, actualización o supresión de tus datos y consultar su finalidad y destinatarios. Contactá al responsable por WhatsApp o teléfono al 3765004174, o escribí a angelgabrelkachu08@gmail.com, e indicá qué derecho querés ejercer; se podrá pedir información razonable para verificar identidad. La supresión puede tener límites cuando deban conservarse datos por obligaciones legales o derechos de terceros.'],
       ['Autoridad de control', 'La Agencia de Acceso a la Información Pública (AAIP) es el organismo de control de la Ley 25.326. Podés consultar sus canales y los derechos reconocidos por la ley en los enlaces oficiales incluidos al pie.'],
-      ['Contacto del responsable', 'Nombre/razón social y domicilio: [COMPLETAR ANTES DE PUBLICAR]. Teléfono de atención y reclamos: 3765004174.'],
+      ['Contacto del responsable', 'Kachuka Ángel Gabriel · Posadas, Misiones, Argentina. Atención y reclamos: 3765004174 · angelgabrelkachu08@gmail.com.'],
     ],
   },
   cookies: {
@@ -4796,7 +4796,7 @@ const LEGAL_SECTIONS = {
       ['Uso actual', 'La aplicación no incorpora actualmente herramientas propias de publicidad ni analítica de seguimiento. Guarda preferencias funcionales en el almacenamiento local del navegador (por ejemplo, el último módulo elegido) y utiliza almacenamiento del navegador para mantener la sesión de Supabase. El flujo de acceso con Google puede usar cookies propias de Google.'],
       ['Para qué sirven', 'Estos elementos permiten iniciar sesión, mantener la seguridad y recordar preferencias. Si se bloquean o se borran, algunas funciones —como conservar la sesión— pueden dejar de funcionar y quizá debas volver a ingresar.'],
       ['Cómo gestionarlas', 'Podés borrar o bloquear cookies y datos del sitio desde los ajustes del navegador. No se instalarán cookies publicitarias sin actualizar previamente esta política y la configuración correspondiente.'],
-      ['Contacto', 'Consultas sobre privacidad o almacenamiento: 3765004174. Responsable: [COMPLETAR NOMBRE/RAZÓN SOCIAL Y DOMICILIO].'],
+      ['Contacto', 'Consultas sobre privacidad o almacenamiento: 3765004174 o angelgabrelkachu08@gmail.com. Responsable: Kachuka Ángel Gabriel, Posadas, Misiones, Argentina.'],
     ],
   },
 }
@@ -4808,6 +4808,7 @@ function LegalLinks({ onOpen }) {
         <button type="button" key={key} onClick={() => onOpen?.(key)}>{item.label}</button>
       ))}
       <a href="https://wa.me/5493765004174?text=Hola%2C%20necesito%20atenci%C3%B3n%20o%20quiero%20realizar%20un%20reclamo." target="_blank" rel="noreferrer">Atención y reclamos</a>
+      <a href="mailto:angelgabrelkachu08@gmail.com">Correo</a>
     </nav>
   )
 }
@@ -4831,11 +4832,11 @@ function LegalDialog({ section = 'terms', onClose }) {
           {Object.entries(LEGAL_SECTIONS).map(([key, item]) => <button type="button" role="tab" aria-selected={active === key} className={active === key ? 'legal-tab-active' : ''} key={key} onClick={() => setActive(key)}>{item.label}</button>)}
         </div>
         <div className="legal-content">
-          <div className="legal-notice"><AlertTriangle size={15}/><span>Documento inicial: completá nombre o razón social y domicilio del responsable antes de publicar la aplicación a clientes.</span></div>
+          <div className="legal-notice"><AlertTriangle size={15}/><span>Responsable informado: Kachuka Ángel Gabriel · Posadas, Misiones. Confirmá que el domicilio indicado sea el domicilio legal que querés publicar.</span></div>
           {content.sections.map(([heading, text]) => <section key={heading}><h3>{heading}</h3><p>{text}</p></section>)}
           {active === 'privacy' && <section><h3>Normativa y autoridad</h3><p><a href="https://www.argentina.gob.ar/normativa/nacional/64790/actualizacion" target="_blank" rel="noreferrer">Ley 25.326 de Protección de Datos Personales</a> · <a href="https://www.argentina.gob.ar/aaip/datospersonales/derechos" target="_blank" rel="noreferrer">Derechos ante la AAIP</a></p></section>}
           {active === 'terms' && <section><h3>Normativa de referencia</h3><p><a href="https://www.argentina.gob.ar/normativa/nacional/638/actualizacion" target="_blank" rel="noreferrer">Ley 24.240 de Defensa del Consumidor</a> · <a href="https://www.argentina.gob.ar/normativa/nacional/ley-26994-235975/actualizacion" target="_blank" rel="noreferrer">Código Civil y Comercial de la Nación</a></p></section>}
-          <p className="legal-updated">Versión inicial · 6 de octubre de 2026 · Atención: <a href="tel:+543765004174">3765004174</a></p>
+          <p className="legal-updated">Versión inicial · 6 de octubre de 2026 · Atención: <a href="tel:+543765004174">3765004174</a> · <a href="mailto:angelgabrelkachu08@gmail.com">angelgabrelkachu08@gmail.com</a></p>
         </div>
       </motion.section>
     </motion.div>
