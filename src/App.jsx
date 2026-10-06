@@ -61,6 +61,27 @@ const MONTHS_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct
 
 const HELP_CONTENT = {
 
+  selector_gestion: {
+    icon: LayoutDashboard,
+    title: 'Elegí qué querés gestionar',
+    color: 'purple',
+    sections: [
+      { heading: 'Préstamos', text: 'Usá este módulo para registrar dinero prestado, seguir cuotas, gestionar clientes y controlar cobros y caja.' },
+      { heading: 'Ventas', text: 'Usá este módulo para mantener el catálogo, registrar ventas financiadas, seguir pagos por cliente y revisar ingresos.' },
+      { heading: 'Podés cambiar después', text: 'La selección solo define por dónde empezar. Podés pasar de un módulo al otro desde el menú lateral.' },
+    ],
+  },
+  login: {
+    icon: ShieldCheck,
+    title: 'Acceso seguro a PrestaNeo',
+    color: 'green',
+    sections: [
+      { heading: 'Entrá con tu cuenta de Google', text: 'El acceso se valida mediante Supabase Auth. Usá la cuenta autorizada para este negocio.' },
+      { heading: 'Tus datos quedan asociados a tu cuenta', text: 'Los préstamos, clientes, ventas y movimientos se cargan desde el espacio conectado a tu sesión.' },
+      { heading: '¿No pudiste entrar?', text: 'Revisá que la cuenta tenga acceso habilitado y volvé a intentarlo. Si el problema continúa, contactá a quien administra el sistema.' },
+    ],
+  },
+
   /* ── DASHBOARD ───────────────────────────────── */
   dashboard: {
     icon: LayoutDashboard,
@@ -611,6 +632,16 @@ const HELP_CONTENT = {
       { heading: '¿Qué muestra la ficha del cliente?', text: 'Historial de todas sus compras a crédito, productos adquiridos, deuda pendiente total y sus datos de contacto.' },
       { heading: '¿Puedo hacerle otra venta?', text: 'Sí. Desde la ficha del cliente usá el botón "Volver a prestar" que lleva a Nueva Venta con sus datos ya precargados.' },
       { heading: '¿Puedo archivar un cliente?', text: 'Sí. El cliente se mueve a la Papelera con todo su historial intacto. Podés restaurarlo cuando quieras.' },
+    ],
+  },
+  v_caja: {
+    icon: Wallet,
+    title: 'Caja — Ventas',
+    color: 'purple',
+    sections: [
+      { heading: '¿Qué muestra?', text: 'Los anticipos y cuotas cobrados por ventas, el importe financiado que sigue pendiente y los movimientos de caja asociados al módulo de ventas.' },
+      { heading: '¿Cómo leer el resumen?', text: 'Disponible ahora refleja entradas menos salidas registradas. Pendiente de cobro suma las cuotas de ventas todavía abiertas. La proyección agrega ese saldo pendiente al disponible actual.' },
+      { heading: '¿Cómo exportar?', text: 'Abrí Generar reporte para descargar los movimientos de ventas y su resumen. Revisá el período elegido antes de guardar el archivo.' },
     ],
   },
 }
@@ -2257,7 +2288,7 @@ function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = 
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Wallet size={11}/> CONTROL FINANCIERO</div>
-          <h2 className="pn-section-title">Caja</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Caja</h2><HelpBtn contentKey={mode === 'ventas' ? 'v_caja' : 'p_caja'} /></div>
           <p className="pn-section-desc">{mode === 'ventas' ? 'Cobros y saldos pendientes de ventas a crédito.' : 'Saldo disponible, cartera prestada y dinero pendiente de recaudar.'}</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-green" onClick={onExport} whileHover={{ scale:1.03 }} whileTap={{ scale:.97 }}>
@@ -3149,7 +3180,7 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
         <div className="lm-page-icon"><HandCoins size={22}/></div>
         <div>
           <div className="pn-eyebrow"><DollarSign size={11}/> PRÉSTAMOS</div>
-          <h2 className="lm-page-title">Nuevo préstamo</h2>
+          <div className="pn-heading-with-help"><h2 className="lm-page-title">Nuevo préstamo</h2><HelpBtn contentKey="p_nuevo" /></div>
           <p className="lm-page-sub">Completá los datos para emitir el préstamo</p>
         </div>
       </div>
@@ -3168,7 +3199,7 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
         <div className="lm-modal-header">
           <div className="lm-page-icon"><HandCoins size={20}/></div>
           <div>
-            <h2 className="lm-page-title">Nuevo préstamo</h2>
+            <div className="pn-heading-with-help"><h2 className="lm-page-title">Nuevo préstamo</h2><HelpBtn contentKey="p_nuevo" /></div>
             <p className="lm-page-sub">Completá los datos para emitir</p>
           </div>
           <button type="button" className="lm-close" onClick={onClose}><X size={18}/></button>
@@ -3314,7 +3345,7 @@ function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Route size={11}/> COBROS DEL DÍA</div>
-          <h2 className="pn-section-title">Ruta de Cobro</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Ruta de Cobro</h2><HelpBtn contentKey="p_ruta" /></div>
           <p className="pn-section-desc">
             {cobros.length > 0
               ? <>{cobros.length} cobro{cobros.length!==1?'s':''} · <span className="text-green">{fmt(totalPendiente)}</span> pendiente</>
@@ -3452,6 +3483,7 @@ function ProductoModal({ producto, onClose, onSave }) {
         <div className="modal-header">
           <Package size={17} style={{ color: '#818cf8' }} />
           <span>{editing ? 'Editar producto' : 'Nuevo producto'}</span>
+          <HelpBtn contentKey="v_catalogo" />
           <button type="button" className="icon-button" onClick={onClose} style={{ marginLeft: 'auto' }}><X size={16}/></button>
         </div>
         <div className="modal-body">
@@ -3509,7 +3541,7 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Package size={11}/> VENTAS</div>
-          <h2 className="pn-section-title">Catálogo de Productos</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Catálogo de Productos</h2><HelpBtn contentKey="v_catalogo" /></div>
           <p className="pn-section-desc">{productos.length} producto{productos.length!==1?'s':''} disponibles para venta a crédito.</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-purple" onClick={() => setModal('new')} whileHover={{ scale:1.03 }} whileTap={{ scale:.97 }}>
@@ -3650,7 +3682,7 @@ function NuevaVenta({ productos = [], onSubmit }) {
       <div className="nv-header">
         <div>
           <div className="pn-eyebrow"><ShoppingCart size={11}/> MÓDULO VENTAS</div>
-          <h2 className="nv-title">Nueva venta a crédito</h2>
+          <div className="pn-heading-with-help"><h2 className="nv-title">Nueva venta a crédito</h2><HelpBtn contentKey="v_nueva" /></div>
         </div>
       </div>
 
@@ -4054,7 +4086,7 @@ function VentasClientes({ ventas = [], payments = [], loading = false, go, onPay
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Store size={11}/> MÓDULO VENTAS</div>
-          <h2 className="pn-section-title">Ventas</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Ventas</h2><HelpBtn contentKey="v_ventas" /></div>
           <p className="pn-section-desc">Compras a crédito por cliente. Tocá una venta para cobrar cuotas.</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-purple" onClick={()=>go('v_nueva')} whileHover={{ scale:1.03 }} whileTap={{ scale:.97 }}>
@@ -4205,7 +4237,7 @@ function ClientesVentas({ ventas = [], payments = [], loading = false, go, onPay
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Users size={11}/> MÓDULO VENTAS</div>
-          <h2 className="pn-section-title">Clientes</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Clientes</h2><HelpBtn contentKey="v_clientes" /></div>
           <p className="pn-section-desc">Clientes con compras a crédito.</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-purple" onClick={()=>go('v_nueva')} whileHover={{ scale:1.03 }} whileTap={{ scale:.97 }}>
@@ -4428,6 +4460,7 @@ function ModeSelector({ onSelect }) {
         <div className="ms2-title-block">
           <h1 className="ms2-title">¿Qué vas a gestionar?</h1>
           <p className="ms2-subtitle">Seleccioná tu módulo de trabajo para hoy</p>
+          <HelpBtn contentKey="selector_gestion" size="lg" />
         </div>
       </motion.div>
 
@@ -4557,6 +4590,7 @@ function Login({ onSignIn }) {
             <span className="lv2-word-purple">Ventas</span>
           </div>
           <p className="lv2-tagline">Todo lo que necesitás para gestionar tu negocio financiero desde el celular.</p>
+          <HelpBtn contentKey="login" size="lg" />
         </div>
 
         {/* Features 2×2 */}
@@ -4813,7 +4847,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Users size={11}/> CLIENTES</div>
-          <h2 className="pn-section-title">Clientes</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Clientes</h2><HelpBtn contentKey="p_clientes" /></div>
           <p className="pn-section-desc">Tocá un cliente para cobrar cuotas o ver su historial.</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-green" onClick={() => onNew(null)}
@@ -4901,7 +4935,7 @@ function PapeleraClientes({ papelera = [], onRestaurar, onEliminar, onExport }) 
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Trash2 size={11}/> CLIENTES</div>
-          <h2 className="pn-section-title">Papelera</h2>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">Papelera</h2><HelpBtn contentKey="p_papelera" /></div>
           <p className="pn-section-desc">Clientes archivados con historial intacto.</p>
         </div>
       </div>
@@ -4974,7 +5008,7 @@ function PrestamosInicio({ totals = {}, loans = [], payments = [], monthBars = [
       <div className="pn-hero pn-hero-green">
         <div className="pn-hero-content">
           <div className="pn-hero-eyebrow"><DollarSign size={12}/> MÓDULO PRÉSTAMOS</div>
-          <h1 className="pn-hero-title">Panel de Resumen</h1>
+          <div className="pn-heading-with-help"><h1 className="pn-hero-title">Panel de Resumen</h1><HelpBtn contentKey="p_inicio" /></div>
           <p className="pn-hero-date">{todayLabel}</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-green" onClick={() => onNew(null)} whileHover={{ scale:1.04 }} whileTap={{ scale:.97 }}>
@@ -5098,7 +5132,7 @@ function VentasInicio({ ventas = [], totals = {}, loading = false, go }) {
       <div className="pn-hero pn-hero-purple">
         <div className="pn-hero-content">
           <div className="pn-hero-eyebrow"><ShoppingCart size={12}/> MÓDULO VENTAS</div>
-          <h1 className="pn-hero-title">Resumen de Ventas</h1>
+          <div className="pn-heading-with-help"><h1 className="pn-hero-title">Resumen de Ventas</h1><HelpBtn contentKey="v_inicio" /></div>
           <p className="pn-hero-date">{todayLabel}</p>
         </div>
         <motion.button className="pn-hero-btn pn-hero-btn-purple" onClick={() => go('v_nueva')} whileHover={{ scale:1.04 }} whileTap={{ scale:.97 }}>
