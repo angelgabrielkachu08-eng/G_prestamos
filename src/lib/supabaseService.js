@@ -396,20 +396,25 @@ export async function crearPrestamo(userId, form) {
     .limit(1)
 
   if (!cajaCheck || cajaCheck.length === 0) {
-    await supabase.from('caja').insert({
+    const { error: cajaError } = await supabase.from('caja').insert({
       owner_id:    userId,
       prestamo_id: prestamoId,
       tipo:        'salida',
       concepto:    `Desembolso ${reference}`,
       monto:       form.principal,
     })
+    if (cajaError) throw new Error(cajaError.message)
   }
+
+  const { data: cajaMovement } = await supabase
+    .from('caja').select('id').eq('prestamo_id', prestamoId).eq('tipo', 'salida').maybeSingle()
 
   return {
     dbResult: {
       cliente_id:  clienteId,
       prestamo_id: prestamoId,
       cuotas:      cuotasData,
+      movimiento_caja_id: cajaMovement?.id,
     },
     reference,
   }
@@ -445,8 +450,12 @@ export async function registrarPago(payment, amount, method = 'efectivo') {
 
   if (error) throw new Error(error.message)
 
+  const { data: cajaMovement } = await supabase
+    .from('caja').select('id').eq('pago_id', data.id).maybeSingle()
+
   return {
     ...data,
+    movimientoCajaId: cajaMovement?.id,
     referencia: reference,
     capital,
     interes: interest,
@@ -916,11 +925,15 @@ export async function crearVentaCredito(userId, form) {
 
   if (error) throw new Error(error.message)
 
+  const { data: cajaMovement } = await supabase
+    .from('caja').select('id').eq('venta_id', result.venta_id).eq('tipo', 'entrada').maybeSingle()
+
   return {
     ventaId:    result.venta_id,
     prestamoId: result.prestamo_id,
     clienteId:  result.cliente_id,
     cuotas:     result.cuotas ?? [],
+    movimientoCajaId: cajaMovement?.id,
     refVenta,
     refPrestamo,
   }
@@ -1014,6 +1027,41 @@ export async function restaurarCliente(clienteId) {
 export async function eliminarClientePermanente(clienteId) {
   const { error } = await supabase.rpc('eliminar_cliente_permanente', { p_cliente_id: clienteId })
   if (error) throw new Error(error.message)
+}
+
+/** Elimina exclusivamente filas de Caja pertenecientes al usuario; pagos y cuotas permanecen intactos. */
+export async function eliminarMovimientosCaja(userId, movementIds, scope = null) {
+  let ids = [...new Set((movementIds ?? []).filter(Boolean))]
+  if (scope === 'prestamos' || scope === 'ventas') {
+    ids = []
+    for (let from = 0; ; from += 1000) {
+      const { data: rows, error: listError } = await supabase
+        .from('caja')
+        .select('id, venta_id, concepto')
+        .eq('owner_id', userId)
+        .range(from, from + 999)
+      if (listError) throw new Error(listError.message)
+      const scopedIds = (rows ?? []).filter(row => {
+        const isVenta = row.venta_id != null || row.concepto?.includes('CV-') || row.concepto?.startsWith('Anticipo venta')
+        return scope === 'ventas' ? isVenta : !isVenta
+      }).map(row => row.id)
+      ids.push(...scopedIds)
+      if ((rows ?? []).length < 1000) break
+    }
+  }
+  if (!ids.length) return 0
+  let deletedCount = 0
+  for (let from = 0; from < ids.length; from += 500) {
+    const { data, error } = await supabase
+      .from('caja')
+      .delete()
+      .eq('owner_id', userId)
+      .in('id', ids.slice(from, from + 500))
+      .select('id')
+    if (error) throw new Error(error.message)
+    deletedCount += data?.length ?? 0
+  }
+  return deletedCount
 }
 
 /** Carga clientes en la papelera */

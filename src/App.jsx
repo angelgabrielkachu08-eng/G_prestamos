@@ -27,6 +27,7 @@ import {
   cargarVentas, crearVentaCredito, cargarCuotasUnificadas,
   // Papelera
   archivarCliente, restaurarCliente, cargarPapelera, cargarFichaCliente, eliminarClientePermanente,
+  eliminarMovimientosCaja,
 } from './lib/supabaseService'
 
 const exportComprobanteDocx = async (...args) =>
@@ -1131,6 +1132,19 @@ export default function App() {
     }
   }, [showToast])
 
+  const handleDeleteCashMovements = useCallback(async (movementIds, options = {}) => {
+    if (!user || !movementIds?.length) return false
+    try {
+      const deletedCount = await eliminarMovimientosCaja(user.id, movementIds, options.bulk ? options.mode : null)
+      await loadData(user.id)
+      showToast(deletedCount === 1 ? 'Movimiento quitado de Caja' : `${deletedCount} movimientos quitados de Caja`)
+      return true
+    } catch (err) {
+      showToast(`No se pudieron eliminar los movimientos: ${err.message}`, 'error')
+      return false
+    }
+  }, [user, loadData, showToast])
+
   // Sincroniza las colecciones de Supabase cuando cambia la sesión.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (user) loadData(user.id) }, [user, loadData])
@@ -1202,7 +1216,7 @@ export default function App() {
         return { ...p, status: 'Parcial', amount: Math.max(0, Number(p.amount) - importeNum) }
       }).filter(Boolean))
       setReceipts((prev) => [{ id: pago.referencia, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt: new Date().toISOString(), status: 'Pagado', n: payment.n, method: 'efectivo' }, ...prev])
-      setLedger((prev) => [{ id: pago.referencia, label: `Cobro · ${payment.client}`, type: 'Entrada', amount: importeNum, time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), rawDate: new Date().toISOString(), origen: (payment.origen ?? 'efectivo') }, ...prev])
+      setLedger((prev) => [{ id: pago.movimientoCajaId ?? pago.referencia, label: `Cobro · ${payment.client}`, type: 'Entrada', amount: importeNum, time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), rawDate: new Date().toISOString(), origen: (payment.origen ?? 'efectivo') }, ...prev])
       const paidIncrement = finalStatus === 'Pagado' ? 1 : 0
       const advanceLoan = (loan) => {
         if (loan.id !== payment.loanId) return loan
@@ -1229,7 +1243,7 @@ export default function App() {
       setLoans((prev) => [newLoan, ...prev])
       setAllLoans((prev) => [{ ...newLoan, totalRecuperado: 0 }, ...prev])
       setPayments((prev) => [...newPayments, ...prev])
-      setLedger((prev) => [{ id: `MOV-${Date.now()}`, label: `Desembolso · ${form.client}`, type: 'Salida', amount: form.principal, time: 'Ahora', rawDate: new Date().toISOString(), origen: 'efectivo' }, ...prev])
+      setLedger((prev) => [{ id: dbResult.movimiento_caja_id ?? `MOV-${Date.now()}`, label: `Desembolso · ${form.client}`, type: 'Salida', amount: form.principal, time: 'Ahora', rawDate: new Date().toISOString(), origen: 'efectivo' }, ...prev])
       setModal(null); setTab('p_clientes')
       showToast(`Préstamo ${reference} creado`)
     } catch (err) { showToast(`No se pudo crear: ${err.message}`, 'error') }
@@ -1324,7 +1338,7 @@ export default function App() {
       // Caja
       if (Number(form.anticipo ?? 0) > 0) {
         setLedger(prev => [{
-          id:      `ANT-${Date.now()}`,
+          id:      result.movimientoCajaId ?? `ANT-${Date.now()}`,
           label:   `Anticipo · ${form.client}`,
           type:    'Entrada',
           amount:  Number(form.anticipo),
@@ -1635,7 +1649,7 @@ export default function App() {
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} loading={loading} onPay={handlePay} onPartial={setPartialTarget} />}
               {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={handlePay} onPartial={setPartialTarget} payments={paymentsEfectivo} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
-              {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} mode="prestamos" payments={paymentsEfectivo} />}
+              {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} mode="prestamos" payments={paymentsEfectivo} />}
 
               {/* ── MÓDULO VENTAS ── */}
               {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} totals={totalsVentas} loading={loading} go={setTab} />}
@@ -1643,7 +1657,7 @@ export default function App() {
               {tab === 'v_nueva'    && <NuevaVenta productos={productos} onSubmit={handleCreateVenta} />}
               {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} />}
               {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
-              {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
+              {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
 
             </motion.div>
           </AnimatePresence>
@@ -2293,9 +2307,10 @@ function Alerts({ alerts, loans, loading, onPay }) {
 /* ═══════════════════════════════════════════════
    CAJA — tabla plana con búsqueda y filtros
 ═══════════════════════════════════════════════ */
-function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = [], payments = [] }) {
+function Cash({ ledger, totals, loading, onExport, onDeleteMovements, mode = 'prestamos', ventas = [], payments = [] }) {
   const [q,          setQ]     = useState('')
   const [filtro,     setFiltro]= useState('Todos')
+  const [busyIds, setBusyIds] = useState([])
 
   const entradas = ledger.filter(x => x.type === 'Entrada').reduce((s,x) => s+x.amount, 0)
   const salidas  = ledger.filter(x => x.type === 'Salida').reduce((s,x) => s+x.amount, 0)
@@ -2324,6 +2339,19 @@ function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = 
     const okQ    = !q.trim() || m.label.toLowerCase().includes(q.toLowerCase())
     return okTipo && okQ
   }), [ledger, filtro, q])
+
+  const deleteMovements = async (rows, bulk = false) => {
+    const ids = rows.map(row => row.id).filter(Boolean)
+    if (!ids.length) return
+    const scope = mode === 'ventas' ? 'de ventas' : 'de préstamos'
+    const message = bulk
+      ? `¿Limpiar todos los movimientos ${scope} de Caja?\n\nEsto solo elimina las filas del registro de Caja. Los cobros, cuotas y préstamos guardados no se anulan.`
+      : `¿Quitar este movimiento de Caja?\n\nEl cobro, la cuota o el préstamo asociado seguirá registrado.`
+    if (!window.confirm(message)) return
+    setBusyIds(ids)
+    await onDeleteMovements?.(ids, { bulk, mode })
+    setBusyIds([])
+  }
 
   return (
     <div className="pn-section">
@@ -2385,6 +2413,9 @@ function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = 
           ))}
         </div>
         <span className="pn-count">{visible.length} mov.</span>
+        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={!ledger.length || busyIds.length > 0} onClick={() => deleteMovements(ledger, true)}>
+          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <Trash2 size={14}/>} Limpiar movimientos
+        </button>
       </div>
 
       {/* Tabla */}
@@ -2399,7 +2430,7 @@ function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = 
           : <motion.div className="pn-panel" initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ delay:.15 }}>
               <div className="table-scroll">
                 <table className="pn-table">
-                  <thead><tr><th>DESCRIPCIÓN</th><th>TIPO</th><th>IMPORTE</th><th>FECHA / HORA</th></tr></thead>
+                  <thead><tr><th>DESCRIPCIÓN</th><th>TIPO</th><th>IMPORTE</th><th>FECHA / HORA</th><th>ACCIÓN</th></tr></thead>
                   <tbody>
                     {visible.map((m, i) => (
                       <motion.tr key={m.id} className={`pn-cash-row pn-cash-row-${m.type === 'Entrada' ? 'entrada' : 'salida'}`}
@@ -2417,6 +2448,11 @@ function Cash({ ledger, totals, loading, onExport, mode = 'prestamos', ventas = 
                           {m.type==='Salida'?'−':''}{fmt(m.amount)}
                         </td>
                         <td className="pn-td-muted">{m.time}</td>
+                        <td>
+                          <button className="pn-btn-icon pn-btn-danger-icon pn-cash-delete" type="button" title="Quitar movimiento de Caja" aria-label={`Quitar movimiento: ${m.label}`} disabled={busyIds.includes(m.id)} onClick={() => deleteMovements([m])}>
+                            {busyIds.includes(m.id) ? <Loader2 size={13} className="pn-spin"/> : <Trash2 size={13}/>}
+                          </button>
+                        </td>
                       </motion.tr>
                     ))}
                   </tbody>

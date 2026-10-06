@@ -4664,6 +4664,11 @@ tbody tr:hover { background: rgba(179,71,255,.06) }
 .pn-pill-active        { background:rgba(0,255,135,.1);border-color:rgba(0,255,135,.35);color:var(--pn-green); }
 .pn-pill-active-purple { background:var(--pn-purple-dim);border-color:var(--pn-purple-border);color:var(--pn-purple); }
 .pn-count { font-size:11px;color:var(--pn-muted);white-space:nowrap; }
+.pn-cash-clear { display:inline-flex;align-items:center;gap:7px;margin-left:auto; }
+.pn-cash-clear:disabled,.pn-cash-delete:disabled { opacity:.5;cursor:not-allowed; }
+.pn-cash-delete { display:inline-flex;align-items:center;justify-content:center;min-width:34px;min-height:34px; }
+@keyframes pnCashSpin { to { transform:rotate(360deg); } }
+.pn-spin { animation:pnCashSpin .8s linear infinite; }
 
 /* ── Empty state ── */
 .pn-empty {
@@ -5649,6 +5654,7 @@ select:focus-visible { outline:2px solid rgba(0,255,135,.65); outline-offset:2px
   .pn-searchbox { max-width:none; flex-basis:100%; }
   .pn-filter-pills { width:100%; }
   .pn-pill { flex:1; padding-inline:9px; }
+  .pn-cash-clear { margin-left:0;width:100%;justify-content:center; }
   .pn-prod-grid,.pn-client-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; }
   .pn-client-card,.pn-prod-card { padding:15px; }
   .pn-client-name,.pn-prod-name { font-size:14px; }
