@@ -3008,6 +3008,7 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
   const body = (
     <form onSubmit={handleSubmit} noValidate>
       <div className="lm-body">
+        <div className="lm-fields-column">
         {/* ── Sección cliente ── */}
         <div className="lm-section">
           <div className="lm-section-header">
@@ -3114,52 +3115,52 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
             )}
           </div>
         </div>
+        {errors.submit && <div className="lm-submit-error">{errors.submit}</div>}
+        </div>
 
         {/* ── Preview ── */}
         <AnimatePresence>
           {preview && (
-            <motion.div className="lm-preview"
-              initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }} exit={{ opacity:0, height:0 }}>
-              <div className="lm-preview-header">
-                <Sparkles size={14}/>
-                <span>Resumen del préstamo</span>
-              </div>
-              <div className="lm-preview-kpis">
-                <div className="lm-pkpi">
-                  <span>Cuota fija</span>
-                  <b>{fmt(preview.monto_cuota)}</b>
+            <motion.aside className="lm-summary-column"
+              initial={{ opacity:0, x:16 }} animate={{ opacity:1, x:0 }} exit={{ opacity:0, x:12 }}>
+              <div className="lm-preview">
+                <div className="lm-preview-header">
+                  <Sparkles size={14}/>
+                  <span>Resumen del préstamo</span>
                 </div>
-                <div className="lm-pkpi">
-                  <span>Interés total</span>
-                  <b className="text-amber">{fmt(preview.total_interes)}</b>
-                </div>
-                <div className="lm-pkpi">
-                  <span>Total a devolver</span>
-                  <b className="text-green">{fmt(preview.total_a_pagar)}</b>
-                </div>
-                <div className="lm-pkpi">
-                  <span>{preview.cronograma.length} cuotas</span>
-                  <b>{preview.cronograma[0]?.fecha_vencimiento} → {preview.cronograma[preview.cronograma.length-1]?.fecha_vencimiento}</b>
-                </div>
-              </div>
-              {/* Mini-cronograma: primeras 4 cuotas */}
-              <div className="lm-mini-sched">
-                {preview.cronograma.slice(0, 4).map((q, i) => (
-                  <div key={i} className="lm-mini-row">
-                    <span className="lm-mini-n">#{q.numero_cuota}</span>
-                    <span className="lm-mini-date">{q.fecha_vencimiento}</span>
-                    <span className="lm-mini-amt">{fmt(q.monto_cuota)}</span>
+                <div className="lm-preview-kpis">
+                  <div className="lm-pkpi">
+                    <span>Cuota fija</span>
+                    <b>{fmt(preview.monto_cuota)}</b>
                   </div>
-                ))}
-                {preview.cronograma.length > 4 && (
-                  <div className="lm-mini-more">+ {preview.cronograma.length - 4} cuotas más…</div>
-                )}
+                  <div className="lm-pkpi">
+                    <span>Interés total</span>
+                    <b className="text-amber">{fmt(preview.total_interes)}</b>
+                  </div>
+                  <div className="lm-pkpi">
+                    <span>Total a devolver</span>
+                    <b className="text-green">{fmt(preview.total_a_pagar)}</b>
+                  </div>
+                  <div className="lm-pkpi">
+                    <span>{preview.cronograma.length} cuotas</span>
+                    <b>{preview.cronograma[0]?.fecha_vencimiento} → {preview.cronograma[preview.cronograma.length-1]?.fecha_vencimiento}</b>
+                  </div>
+                </div>
+                {/* Cronograma compacto con todas las fechas de pago. */}
+                <div className="lm-mini-sched">
+                  {preview.cronograma.map((q, i) => (
+                    <div key={i} className="lm-mini-row">
+                      <span className="lm-mini-n">#{q.numero_cuota}</span>
+                      <span className="lm-mini-date">{q.fecha_vencimiento}</span>
+                      <span className="lm-mini-amt">{fmt(q.monto_cuota)}</span>
+                    </div>
+                  ))}
+                </div>
+                {freq === 'diario' && omitSun && <p className="lm-schedule-note">Las fechas omiten domingos.</p>}
               </div>
-            </motion.div>
+            </motion.aside>
           )}
         </AnimatePresence>
-
-        {errors.submit && <div className="lm-submit-error">{errors.submit}</div>}
       </div>
 
       <div className="lm-footer">
