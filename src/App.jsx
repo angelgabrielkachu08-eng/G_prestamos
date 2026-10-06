@@ -4809,8 +4809,8 @@ function Login({ onSignIn, onOpenLegal, performanceMode, onTogglePerformance }) 
       {/* Background orbs */}
       {!performanceMode && orbs.map((o, i) => (
         <motion.div key={i} className={o.cls} style={o.style}
-          animate={{ scale: [1, 1.4, 1], opacity: [0.5, 0.9, 0.5] }}
-          transition={{ duration: 5 + i * 1.5, repeat: Infinity, delay: i * 0.8 }}/>
+          animate={{ opacity: [0.18, 0.38, 0.18] }}
+          transition={{ duration: 12 + i * 2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.8 }}/>
       ))}
       {/* Side neon lines */}
       <div className="lv2-neon-left"/>

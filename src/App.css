@@ -5923,6 +5923,58 @@ html[data-performance-mode="on"] .lv2-orb-purple {
   .ms2-card-list li { font-size:8px!important; }
   .ms2-card-cta { padding:6px 5px;font-size:10px; }
 }
+
+/* Fondo del acceso liviano: brillo bajo y animaciones solo de opacidad. */
+.lv2-root {
+  background:#07080d!important;
+}
+.lv2-root::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background:
+    radial-gradient(ellipse 38% 34% at 12% 18%,rgba(0,255,135,.075),transparent 72%),
+    radial-gradient(ellipse 42% 38% at 88% 82%,rgba(179,71,255,.085),transparent 72%);
+  opacity:.7;
+  animation:loginAmbientOpacity 18s ease-in-out infinite alternate;
+}
+@keyframes loginAmbientOpacity { from { opacity:.55; } to { opacity:.9; } }
+.lv2-root::after {
+  background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.012) 50%,transparent 70%)!important;
+  background-size:100% 100%!important;
+  animation:loginSweepOpacity 16s ease-in-out infinite alternate!important;
+}
+@keyframes loginSweepOpacity { from { opacity:.18; } to { opacity:.55; } }
+.lv2-orb {
+  filter:none!important;
+  width:min(36vw,300px)!important;
+  height:min(36vw,300px)!important;
+  will-change:opacity;
+}
+.lv2-orb-green { background:radial-gradient(circle,rgba(0,255,135,.16),rgba(0,180,100,.05) 48%,transparent 72%)!important; }
+.lv2-orb-purple { background:radial-gradient(circle,rgba(179,71,255,.15),rgba(120,40,200,.05) 48%,transparent 72%)!important; }
+.lv2-orb-blue { background:radial-gradient(circle,rgba(56,189,248,.08),rgba(30,100,200,.025) 48%,transparent 72%)!important; }
+.lv2-orb-pink { background:radial-gradient(circle,rgba(255,77,180,.07),rgba(200,30,120,.02) 48%,transparent 72%)!important; }
+.lv2-card { box-shadow:0 28px 78px rgba(0,0,0,.68),0 0 20px rgba(179,71,255,.045),inset 0 1px rgba(255,255,255,.08)!important; }
+.lv2-card-glow { opacity:.24!important;filter:none!important;animation:none!important; }
+.lv2-word-green { text-shadow:0 0 5px rgba(32,255,160,.35),0 0 11px rgba(0,255,135,.14)!important; }
+.lv2-word-purple { text-shadow:0 0 5px rgba(220,156,255,.32),0 0 11px rgba(179,71,255,.15)!important; }
+.lv2-neon-left,.lv2-neon-right { box-shadow:none!important;opacity:.28; }
+.lv2-neon-left { background:linear-gradient(to bottom,transparent,rgba(0,255,135,.12) 30%,rgba(0,255,135,.2) 50%,rgba(0,255,135,.12) 70%,transparent)!important; }
+.lv2-neon-right { background:linear-gradient(to bottom,transparent,rgba(179,71,255,.12) 30%,rgba(179,71,255,.2) 50%,rgba(179,71,255,.12) 70%,transparent)!important; }
+html[data-performance-mode="on"] .lv2-root::before,
+html[data-performance-mode="on"] .lv2-root::after { display:none!important; }
+@media(max-width:640px) {
+  .lv2-orb { width:220px!important;height:220px!important; }
+  .lv2-orb-blue,.lv2-orb-pink { display:none; }
+  .lv2-card { box-shadow:0 20px 54px rgba(0,0,0,.62),inset 0 1px rgba(255,255,255,.07)!important; }
+  .lv2-neon-left,.lv2-neon-right { opacity:.16; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .lv2-root::before,.lv2-root::after { animation:none!important; }
+}
 .vc-quota-warning svg { flex:0 0 auto;margin-top:1px; }
 
 /* Alta de préstamo: formulario, cuotas y acción visibles en una sola vista. */
