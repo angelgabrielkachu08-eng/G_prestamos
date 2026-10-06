@@ -5833,6 +5833,61 @@ select:focus-visible { outline:2px solid rgba(0,255,135,.65); outline-offset:2px
   .lm-box .lm-mini-sched { gap:3px 7px; }
   .lm-box .lm-footer { padding:8px 18px; }
 }
+
+/* La pestaña Nuevo préstamo usa el mismo diseño compacto que el modal. */
+@media(min-width:641px) {
+  .lm-page { gap:12px; }
+  .lm-page-header { padding:12px 18px; gap:12px; }
+  .lm-page-header .lm-page-icon { width:42px; height:42px; border-radius:12px; }
+  .lm-page-title { font-size:20px; }
+  .lm-page > form { display:flex; flex-direction:column; gap:0; }
+  .lm-page > form > .lm-body {
+    display:grid;
+    grid-template-columns:minmax(0,1.12fr) minmax(310px,.88fr);
+    align-items:center;
+    gap:18px;
+    padding:12px 18px;
+    overflow:visible;
+  }
+  .lm-page .lm-fields-column { gap:12px; }
+  .lm-page .lm-section { gap:7px; }
+  .lm-page .lm-grid { gap:7px 12px; }
+  .lm-page .lm-label { margin-bottom:3px; font-size:10px; }
+  .lm-page .lm-input { min-height:36px; padding-top:7px; padding-bottom:7px; }
+  .lm-page .lm-toggle { padding:7px 10px; font-size:11px; }
+  .lm-page .lm-footer { min-height:52px; padding:8px 18px; }
+  .lm-page .lm-summary-column { position:static; width:100%; }
+  .lm-page .lm-preview { padding:12px; }
+  .lm-page .lm-preview-header { margin-bottom:8px; }
+  .lm-page .lm-preview-kpis { gap:7px 9px; margin-bottom:8px; }
+  .lm-page .lm-pkpi b { font-size:12px; }
+  .lm-page .lm-mini-sched {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:4px 8px;
+    max-height:none;
+    overflow:visible;
+    padding-top:7px;
+  }
+  .lm-page .lm-mini-row { min-width:0; gap:4px; font-size:10px; }
+  .lm-page .lm-mini-n { width:21px; flex:0 0 21px; font-size:9px; }
+  .lm-page .lm-mini-date { min-width:0; font-size:9px; }
+  .lm-page .lm-mini-amt { white-space:nowrap; font-size:9px; }
+}
+@media(min-width:641px) and (max-width:840px) {
+  .lm-page > form > .lm-body { grid-template-columns:minmax(0,1fr) minmax(270px,.82fr); gap:12px; }
+  .lm-page .lm-fields-column .lm-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(min-width:641px) and (max-height:760px) {
+  .lm-page { gap:8px; }
+  .lm-page-header { padding:9px 14px; }
+  .lm-page > form > .lm-body { padding:8px 14px; gap:12px; }
+  .lm-page .lm-fields-column { gap:8px; }
+  .lm-page .lm-section { gap:5px; }
+  .lm-page .lm-grid { gap:5px 9px; }
+  .lm-page .lm-input { min-height:32px; padding-top:5px; padding-bottom:5px; }
+  .lm-page .lm-footer { min-height:46px; padding:6px 14px; }
+}
 @media(max-width:640px) {
   .legal-overlay { align-items:flex-end;padding:8px; }
   .legal-dialog { max-height:92dvh;border-radius:18px 18px 12px 12px; }
