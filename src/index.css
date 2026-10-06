@@ -1,0 +1,9 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root { font-family: 'DM Sans', sans-serif; color: #e8e9ed; background: #08090c; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; --bg:#08090c; --surface:#101216; --surface-2:#14161b; --line:#22252c; --muted:#7f8592; --text:#e8e9ed; --purple:#a855f7; --green:#22c55e; --mono:'DM Mono',monospace; --heading:'Manrope',sans-serif; }
+* { box-sizing: border-box; }
+body { margin:0; min-width:360px; min-height:100vh; background:var(--bg); }
+button,input,select { font:inherit; }
+button { color:inherit; }
+::selection { background:#a855f755; }
