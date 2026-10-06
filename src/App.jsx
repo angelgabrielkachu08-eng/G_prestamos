@@ -1677,7 +1677,6 @@ export default function App() {
             <button type="button" onClick={() => setLegalSection('privacy')}>Privacidad</button>
             <button type="button" onClick={() => setLegalSection('cookies')}>Cookies</button>
           </div>
-          <button onClick={() => showToast('Prestaneo · Centro de ayuda', 'info')}>Ayuda <ArrowUpRight size={13}/></button>
         </footer>
       </main>
 
