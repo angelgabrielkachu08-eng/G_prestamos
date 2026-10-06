@@ -904,6 +904,7 @@ const NAV_VENTAS = [
   { id: 'v_nueva',    label: 'Nueva venta',      icon: ShoppingCart },
   { id: 'v_ventas',   label: 'Ventas',           icon: Store },
   { id: 'v_clientes', label: 'Clientes',         icon: Users },
+  { id: 'v_papelera', label: 'Papelera',         icon: Trash2 },
   { id: 'v_caja',     label: 'Caja',             icon: Wallet },
 ]
 const nav = [...NAV_PRESTAMOS, ...NAV_VENTAS]
@@ -1374,9 +1375,8 @@ export default function App() {
   const handleArchivarCliente = async (clienteId, nombre) => {
     try {
       await archivarCliente(clienteId)
-      // Quitar de lista activa y agregar a papelera local
-      setLoans(prev => prev.filter(l => l.clienteId !== clienteId))
-      setAllLoans(prev => prev.filter(l => l.clienteId !== clienteId))
+      // Sincronizar ventas, préstamos, cuotas y estadísticas con el cliente archivado.
+      await loadData(user.id)
       setPapelera(await cargarPapelera(user.id))
       showToast(`${nombre} movido a la papelera`)
     } catch (err) { showToast(`Error: ${err.message}`, 'error') }
@@ -1661,7 +1661,8 @@ export default function App() {
               {tab === 'v_catalogo' && <Catalogo productos={productos} loading={loading} onCreate={handleCreateProduct} onUpdate={handleUpdateProduct} onDelete={handleDeleteProduct} />}
               {tab === 'v_nueva'    && <NuevaVenta productos={productos} onSubmit={handleCreateVenta} />}
               {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} />}
-              {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
+              {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onArchive={handleArchivarCliente} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
+              {tab === 'v_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
 
             </motion.div>
@@ -4276,7 +4277,7 @@ function VentasClientes({ ventas = [], payments = [], loans = [], loading = fals
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES VENTAS — grid de tarjetas de clientes de ventas
 ═══════════════════════════════════════════════════════════════ */
-function ClientesVentas({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onExportClient, onExportSale }) {
+function ClientesVentas({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onArchive, onExportClient, onExportSale }) {
   const [q,        setQ]      = useState('')
   const [selected, setSelected] = useState(null)
 
@@ -4323,6 +4324,14 @@ function ClientesVentas({ ventas = [], payments = [], loans = [], loading = fals
             </button>
             <button className="pn-btn-primary pn-btn-purple pn-btn-sm" onClick={()=>go('v_nueva')}>
               <ShoppingCart size={13}/> Nueva venta
+            </button>
+            <button className="pn-btn-danger pn-btn-sm" onClick={() => {
+              if (window.confirm(`¿Mover a ${c.client} a la papelera? Sus ventas y cuotas quedarán archivadas y podrás restaurarlo después.`)) {
+                onArchive?.(c.clienteId, c.client)
+                setSelected(null)
+              }
+            }}>
+              <Trash2 size={12}/> Archivar cliente
             </button>
             {c.phone && <a className="pn-btn-wa" href={`https://wa.me/${sanitizePhone(c.phone)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/></a>}
           </div>
@@ -4404,6 +4413,11 @@ function ClientesVentas({ ventas = [], payments = [], loans = [], loading = fals
                     <div className="pn-client-actions">
                       <button className="pn-btn-outline pn-btn-sm" style={{flex:1}} onClick={()=>setSelected(c)}>
                         <FileText size={12}/> Ver ficha
+                      </button>
+                      <button className="pn-btn-icon pn-btn-danger-icon" type="button" title="Archivar cliente" aria-label={`Archivar a ${c.client}`} onClick={() => {
+                        if (window.confirm(`¿Mover a ${c.client} a la papelera? Sus ventas y cuotas quedarán archivadas y podrás restaurarlo después.`)) onArchive?.(c.clienteId, c.client)
+                      }}>
+                        <Trash2 size={13}/>
                       </button>
                       {c.phone && <a className="pn-btn-wa" href={`https://wa.me/${sanitizePhone(c.phone)}`} target="_blank" rel="noreferrer"><MessageCircle size={13}/></a>}
                     </div>

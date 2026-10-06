@@ -818,7 +818,7 @@ export async function cargarVentas(userId) {
     .from('ventas')
     .select(`
       *,
-      cliente:clientes ( id, nombre_completo, telefono ),
+      cliente:clientes ( id, nombre_completo, telefono, eliminado ),
       detalle_ventas (
         id, cantidad, precio_unitario, subtotal,
         producto:productos ( id, nombre, categoria )
@@ -830,7 +830,7 @@ export async function cargarVentas(userId) {
 
   if (error) throw new Error(error.message)
 
-  return data.map(v => {
+  return data.filter(v => !v.cliente?.eliminado).map(v => {
     // La relación ventas→préstamos es 1:N en PostgREST y puede llegar como arreglo.
     const prestamoRow = Array.isArray(v.prestamo) ? v.prestamo[0] : v.prestamo
     return {
