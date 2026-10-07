@@ -8,7 +8,7 @@ import {
   Sparkles, TrendingDown, TrendingUp, Users, Wallet, X, ReceiptText, UserRound,
   MessageCircle, Landmark, CircleAlert, Loader2, AlertTriangle, RefreshCw,
   Phone, Clock, Zap, BarChart3, CreditCard, Edit3, History,
-  Calendar, Target, ChevronRight, PieChart, Route, RefreshCcw, Star,
+  Calendar, Target, ChevronRight, PieChart, Route, RefreshCcw,
   HelpCircle, GraduationCap, ChevronLeft,
   FileSpreadsheet, ArrowRight,
   ShoppingCart, Package, Store, Layers,
@@ -59,13 +59,21 @@ function friendlyConnectionError(message) {
   return value
 }
 
-const today = new Date().toISOString().slice(0, 10)
+const localDateKey = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const today = localDateKey()
 const todayLabel = new Date().toLocaleDateString('es-AR', {
   weekday: 'long', day: 'numeric', month: 'long',
 }).toUpperCase()
 
 const daysUntil = (date) =>
   Math.round((new Date(`${date}T12:00:00`) - new Date(`${today}T12:00:00`)) / 86_400_000)
+const daysUntilDate = (date, reference = localDateKey()) =>
+  Math.round((new Date(`${date}T12:00:00`) - new Date(`${reference}T12:00:00`)) / 86_400_000)
 
 const MONTHS_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 
@@ -416,7 +424,7 @@ const HELP_CONTENT = {
     ],
   },
 
-  /* ── CLIENTES / SCORE ────────────────────────── */
+  /* ── CLIENTES ────────────────────────────────── */
   clientes: {
     icon: Users,
     title: 'Cartera de Clientes',
@@ -424,34 +432,7 @@ const HELP_CONTENT = {
     sections: [
       {
         heading: '¿Qué muestra?',
-        text: 'Todos los clientes con préstamos activos o en mora, con su score crediticio interno calculado desde el historial real de pagos dentro de PrestaNeo.',
-      },
-      {
-        heading: '¿Qué es el Score Crediticio?',
-        text: 'Un número entre 300 y 850 que indica qué tan buen pagador es el cliente basado en su historial en tu cartera. Verde (720–850) = paga a tiempo. Amarillo (580–719) = demoras leves. Rojo (300–579) = alto riesgo.',
-      },
-      {
-        heading: '¿Cómo se calcula el score?',
-        text: 'Se basa en: % de cuotas pagadas a tiempo, cantidad de préstamos completados, y penalización si está actualmente en mora. Sube con cada cuota puntual y baja con cada mora.',
-      },
-    ],
-  },
-  score_crediticio: {
-    icon: Star,
-    title: 'Score Crediticio Interno',
-    color: 'green',
-    sections: [
-      {
-        heading: '¿Qué significa el número?',
-        text: '• 720–850 (verde) "Paga a tiempo": cliente confiable, historial impecable.\n• 580–719 (amarillo) "Demoras leves": paga pero a veces tarde.\n• 300–579 (rojo) "Alto riesgo": mora frecuente o deuda actual en mora.',
-      },
-      {
-        heading: '¿Por qué usarlo?',
-        text: 'Te ayuda a decidir si darle un nuevo préstamo a un cliente y con qué condiciones. A menor score, conviene pedir una tasa más alta o cuotas más frecuentes para reducir el riesgo.',
-      },
-      {
-        heading: '¿Es el score BCRA/Veraz?',
-        text: 'No. Es un score INTERNO calculado exclusivamente con el historial de pagos dentro de PrestaNeo. No consulta ni impacta en el score financiero externo del cliente.',
+        text: 'Todos los clientes con préstamos activos o en mora y su historial de cuotas dentro de PrestaNeo.',
       },
     ],
   },
@@ -586,7 +567,7 @@ const HELP_CONTENT = {
     title: 'Ruta del Día',
     color: 'green',
     sections: [
-      { heading: '¿Qué muestra la ruta?', text: 'Los cobros de HOY: cuotas que vencen hoy y cuotas ya vencidas. Aparecen ordenadas de mayor urgencia a menor para que empieces por lo más importante.' },
+      { heading: '¿Qué muestra la ruta?', text: 'Las cuotas vencidas, las que vencen hoy y las próximas. La app marca los vencimientos de hoy y te avisa con dos días de anticipación.' },
       { heading: '¿Cómo usarla en campo?', text: '1. Abrila al salir a cobrar.\n2. Cobrás → tocás "Cobrar".\n3. No están → enviás WhatsApp o llamás desde el mismo botón.\n4. La barra de progreso muestra cuánto llevás del día.' },
       { heading: '¿Incluye también ventas a crédito?', text: 'Sí. Si tenés ambos módulos activos, la ruta unifica cuotas de préstamos en efectivo y de ventas en un solo lugar, con badges de color para distinguirlos.' },
     ],
@@ -596,7 +577,7 @@ const HELP_CONTENT = {
     title: 'Clientes — Préstamos',
     color: 'green',
     sections: [
-      { heading: '¿Qué muestra cada tarjeta?', text: 'Nombre, teléfono, score crediticio calculado de su historial de pagos, capital prestado y progreso de cuotas.' },
+      { heading: '¿Qué muestra cada tarjeta?', text: 'Nombre, teléfono, capital prestado y progreso de cuotas. Abrí la ficha para revisar su historial y deuda pendiente.' },
       { heading: '¿Qué es la ficha de cliente?', text: 'Al tocar "Ver ficha" accedés a su historial completo: todos los préstamos, compras a crédito, deuda total pendiente y acciones directas (WhatsApp, volver a prestar, archivar).' },
       { heading: '¿Qué pasa si archivás un cliente?', text: 'No se borra. Se mueve a la Papelera con todos sus datos e historial intactos. Podés restaurarlo cuando quieras desde la sección Papelera.' },
     ],
@@ -712,7 +693,7 @@ const TOUR_STEPS = [
     id: 'clientes',
     target: 'clientes',
     title: '4 de 6 · Clientes',
-    text: 'El listado de clientes con su score crediticio calculado de su historial de pagos. Verde = buen pagador. Rojo = alto riesgo. Usá "Volver a prestar" para darles un nuevo préstamo sin re-ingresar datos.',
+    text: 'Consultá clientes, cuotas e historial. Usá "Volver a prestar" para iniciar un préstamo con sus datos ya cargados.',
     position: 'right',
   },
   {
@@ -1141,6 +1122,10 @@ export default function App() {
   const [dataError, setDataError]         = useState(null)
   const [isOnline, setIsOnline]           = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine)
   const [legalSection, setLegalSection]   = useState(null)
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+  )
+  const [reminderClock, setReminderClock] = useState(() => Date.now())
   const paymentLocks = useRef(new Set())
   const dataLoadVersion = useRef(0)
 
@@ -1152,6 +1137,60 @@ export default function App() {
       return next
     })
   }, [])
+
+  const paymentReminders = useMemo(() => {
+    const reference = localDateKey(new Date(reminderClock))
+    const pending = payments.filter(p => (p.origen ?? 'efectivo') === 'efectivo' &&
+      ['Pendiente','Vencido','Parcial'].includes(p.status) && [0, 2].includes(daysUntilDate(p.due, reference))
+    )
+    return {
+      today: pending.filter(p => daysUntilDate(p.due, reference) === 0),
+      inTwoDays: pending.filter(p => daysUntilDate(p.due, reference) === 2),
+    }
+  }, [payments, reminderClock])
+  const reminderCount = paymentReminders.today.length + paymentReminders.inTwoDays.length
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') setReminderClock(Date.now())
+    }, 5 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const count = reminderCount
+    if (count > 0 && 'setAppBadge' in navigator) navigator.setAppBadge(count).catch(() => {})
+    else if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {})
+  }, [reminderCount])
+
+  useEffect(() => {
+    if (notificationPermission !== 'granted' || !user) return
+    const date = localDateKey()
+    const groups = [
+      { key: 'today', title: 'Cobros para hoy', items: paymentReminders.today },
+      { key: 'two-days', title: 'Cobros dentro de 2 días', items: paymentReminders.inTwoDays },
+    ]
+    let cancelled = false
+    for (const group of groups) {
+      if (!group.items.length) continue
+      const storageKey = `pn-reminder-${user.id}-${date}-${group.key}`
+      try { if (localStorage.getItem(storageKey)) continue } catch { /* Se permite avisar aunque el almacenamiento esté bloqueado. */ }
+      const names = [...new Set(group.items.map(p => p.client).filter(Boolean))]
+      const body = `${group.items.length} cuota${group.items.length === 1 ? '' : 's'} · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' y más' : ''}`
+      const notify = async () => {
+        if (cancelled || Notification.permission !== 'granted') return
+        try {
+          if ('serviceWorker' in navigator) {
+            const registration = await navigator.serviceWorker.ready
+            await registration.showNotification(group.title, { body, icon: '/pwa-192.svg', badge: '/pwa-192.svg', tag: storageKey, data: { url: '/' } })
+          } else new Notification(group.title, { body, tag: storageKey })
+          try { localStorage.setItem(storageKey, '1') } catch { /* No bloquea el aviso. */ }
+        } catch { /* El navegador puede desactivar avisos aunque el permiso figure concedido. */ }
+      }
+      notify()
+    }
+    return () => { cancelled = true }
+  }, [notificationPermission, user, paymentReminders])
 
   useEffect(() => {
     performanceModeActive = performanceMode
@@ -1171,6 +1210,20 @@ export default function App() {
   /* ── Toasts ── */
   const showToast = useCallback((message, kind = 'success') => setToast({ message: friendlyConnectionError(message), kind }), [])
   const dismissToast = useCallback(() => setToast(null), [])
+  const enableNotifications = useCallback(async () => {
+    if (typeof Notification === 'undefined') {
+      showToast('Este navegador no admite notificaciones del sistema. Podés instalar PrestaNeo desde Chrome o Safari.', 'error')
+      return
+    }
+    try {
+      const permission = await Notification.requestPermission()
+      setNotificationPermission(permission)
+      if (permission === 'granted') showToast('Avisos activados para cuotas de hoy y de dentro de 2 días.')
+      else showToast('No se activaron los avisos. Podés habilitarlos desde los ajustes del navegador.', 'error')
+    } catch {
+      showToast('No se pudo activar el permiso de notificaciones.', 'error')
+    }
+  }, [showToast])
   useEffect(() => { if (!toast) return; const t = setTimeout(dismissToast, 4500); return () => clearTimeout(t) }, [toast, dismissToast])
 
   /* ── Auth ── */
@@ -1697,7 +1750,7 @@ export default function App() {
   /* ── Selector de modo (primera pantalla tras login) ── */
   if (!modo) return <><ModeSelector onSelect={elegirModo} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
-  const rutaCount    = paymentsEfectivo.filter((p) => daysUntil(p.due) === 0 && (p.status === 'Pendiente' || p.status === 'Parcial')).length
+  const rutaCount    = reminderCount
 
   return (
     <MotionConfig reducedMotion={performanceMode ? 'always' : 'never'} skipAnimations={performanceMode} transition={performanceMode ? { skipAnimations: true } : undefined}>
@@ -1705,7 +1758,7 @@ export default function App() {
       <aside className={`sidebar sidebar-${modo} ${mobileOpen ? 'sidebar-open' : ''}`}>
         {/* Brand con botón cambiar modo */}
         <div className="brand">
-          <div className="brand-mark"><BrandMark size={21} /></div>
+          <div className="brand-mark brand-mark-with-badge"><BrandMark size={21} />{reminderCount > 0 && <span className="brand-notification-badge" aria-label={`${reminderCount} avisos pendientes`}>{reminderCount > 99 ? '99+' : reminderCount}</span>}</div>
           <div>
             <b>presta<span>neo</span></b>
             <small>{modo === 'prestamos' ? '💵 PRÉSTAMOS' : '🛒 VENTAS'}</small>
@@ -1772,6 +1825,11 @@ export default function App() {
           </div>
           <div className="top-actions">
             {(loading || ventasLoading) && <Spinner size={16} className="top-spinner"/>}
+            <button type="button" className="notification-toggle" onClick={enableNotifications}
+              title={notificationPermission === 'granted' ? 'Avisos del navegador activados' : 'Activar avisos en este dispositivo'}
+              aria-label={notificationPermission === 'granted' ? 'Avisos activados' : 'Activar avisos'}>
+              <Bell size={16}/>{reminderCount > 0 && <span>{reminderCount > 99 ? '99+' : reminderCount}</span>}
+            </button>
             <div className="topbar-caja" title="Cobrado hoy">
               <ArrowDownLeft size={13}/><span>{fmt(totals.cobradoHoy)}</span>
             </div>
@@ -2296,7 +2354,7 @@ function Loans({ loans, allLoans, query, setQuery, loading, onNew, onRefinanciar
                     <td>
                       <div className="table-person">
                         <div className="person-avatar">{l.client.split(' ').map((x) => x[0]).slice(0,2).join('')}</div>
-                        <div><b>{l.client}</b><small>{l.dni || '—'} · {l.risk}</small></div>
+                        <div><b>{l.client}</b><small>{l.dni || '—'}</small></div>
                       </div>
                     </td>
                     <td className="mono">{l.id}<small>{l.installments} cuotas · {l.rate}%</small></td>
@@ -2354,23 +2412,6 @@ function Loans({ loans, allLoans, query, setQuery, loading, onNew, onRefinanciar
 function Clients({ loans, allLoans, loading, onNew, onEdit }) {
   const grouped = [...new Map(loans.map((l) => [l.client, l])).values()]
 
-  // Score calculado desde historial real de pagos
-  const calcScore = useCallback((clientName) => {
-    const clientLoans = (allLoans.length > 0 ? allLoans : loans).filter((l) => l.client === clientName)
-    if (clientLoans.length === 0) return { score: 700, label: 'Sin historial', cls: 'medio' }
-    const totalCuotas = clientLoans.reduce((s, l) => s + Number(l.installments || 0), 0)
-    const pagadas     = clientLoans.reduce((s, l) => s + Number(l.paid || 0), 0)
-    const enMora      = clientLoans.some(l => l.status === 'En mora')
-    const completados = clientLoans.filter(l => l.status === 'Pagado').length
-    const tasa        = totalCuotas > 0 ? pagadas / totalCuotas : 0
-    let score = Math.round(300 + tasa * 450 + completados * 20)
-    if (enMora) score = Math.max(300, score - 120)
-    score = Math.min(850, score)
-    const cls   = score >= 720 ? 'bajo' : score >= 580 ? 'medio' : 'alto'
-    const label = score >= 720 ? 'Paga a tiempo' : score >= 580 ? 'Demoras leves' : 'Alto riesgo'
-    return { score, label, cls }
-  }, [allLoans, loans])
-
   return (
     <>
       <PageTitle eyebrow="RELACIÓN CON CLIENTES" title="Clientes" description="Tu red de confianza y su historial crediticio." action={onNew} actionLabel="Añadir con préstamo" icon={UserRound} helpKey="clientes" />
@@ -2395,25 +2436,6 @@ function Clients({ loans, allLoans, loading, onNew, onEdit }) {
                   </div>
                   <h3>{client.client}</h3>
                   <p>DNI {client.dni || '—'} · {client.address || 'Sin dirección'}</p>
-                  {(() => {
-                    const { score, label, cls } = calcScore(client.client)
-                    return (
-                      <div className="score-row">
-                        <div>
-                          <small>SCORE CREDITICIO INTERNO</small>
-                          <b className={cls === 'alto' ? 'text-red' : cls === 'medio' ? '' : 'text-green'}>
-                            {score}<span>/850</span>
-                          </b>
-                        </div>
-                        <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-                          <span className={`score-badge score-${cls}`}>
-                            {cls === 'bajo' ? '★ ' : cls === 'medio' ? '◑ ' : '⚠ '}{label}
-                          </span>
-                          <HelpBtn contentKey="score_crediticio" size="sm" />
-                        </div>
-                      </div>
-                    )
-                  })()}
                   <div className="client-metrics">
                     <div><small>Préstamo actual</small><b><Money value={client.principal}/></b></div>
                     <div><small>Cuotas pagadas</small><b>{client.paid} <span>/ {client.installments}</span></b></div>
@@ -3691,6 +3713,7 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
   const totalPendiente = cobros.reduce((s,p) => s + Number(p.amount), 0)
   const vencidos = payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && daysUntil(p.due) < 0)
   const totalVencido = vencidos.reduce((s,p) => s + Number(p.amount || 0), 0)
+  const cuotasHoy = payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && daysUntil(p.due) === 0).length
   const promesasHoy = promises.filter(p => p.estado === 'pendiente' && p.fecha === today).length
   const promesasAtrasadas = promises.filter(p => p.estado === 'pendiente' && p.fecha < today).length
 
@@ -3712,6 +3735,8 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
         <div><small>Cuotas vencidas</small><b className="text-red">{vencidos.length}</b></div>
         <div><small>Saldo vencido</small><b className="text-red"><Money value={totalVencido}/></b></div>
         <div><small>Saldo en esta vista</small><b><Money value={totalPendiente}/></b></div>
+        <div><small>Cuotas para cobrar hoy</small><b className="text-amber">{cuotasHoy}</b></div>
+        <div><small>Vencen en 2 días</small><b className="text-purple">{payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && daysUntil(p.due) === 2).length}</b></div>
         <div><small>Promesas para hoy</small><b className="text-purple">{promesasHoy}</b></div>
         <div><small>Promesas atrasadas</small><b className={promesasAtrasadas ? 'text-red' : 'text-green'}>{promesasAtrasadas}</b></div>
       </div>
@@ -4677,7 +4702,7 @@ function ClientesVentas({ ventas = [], payments = [], loans = [], loading = fals
           <ChevronLeft size={15}/> Volver a clientes
         </button>
         <div className="pn-ficha-header">
-          <div className="pn-ficha-avatar pn-score-bg-medio">
+          <div className="pn-ficha-avatar">
             {c.client.split(' ').map(x=>x[0]).slice(0,2).join('')}
           </div>
           <div className="pn-ficha-info">
@@ -4760,7 +4785,7 @@ function ClientesVentas({ ventas = [], payments = [], loans = [], loading = fals
                     transition={{ delay:i*.05, type:'spring', stiffness:260, damping:22 }}
                     whileHover={{ y:-4 }}>
                     <div className="pn-client-card-top">
-                      <div className={`pn-client-avatar ${tieneVencidas?'pn-score-bg-alto':'pn-score-bg-medio'}`}>
+                      <div className="pn-client-avatar">
                         {c.client.split(' ').map(x=>x[0]).slice(0,2).join('')}
                       </div>
                       {tieneVencidas && <span className="pn-badge-red" style={{fontSize:9}}>Mora</span>}
@@ -5234,21 +5259,6 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
   const [selected, setSel] = useState(null)
   const [expandedInstallment, setExpandedInstallment] = useState(null)
 
-  const calcScore = useCallback((clientName) => {
-    const cl = (allLoans.length > 0 ? allLoans : loans).filter(l => l.client === clientName)
-    if (!cl.length) return { score:700, label:'Sin historial', cls:'medio' }
-    const totalQ  = cl.reduce((s,l) => s + Number(l.installments||0), 0)
-    const pagadas = cl.reduce((s,l) => s + Number(l.paid||0), 0)
-    const enMora  = cl.some(l => l.status === 'En mora')
-    const completados = cl.filter(l => l.status === 'Pagado').length
-    let score = Math.round(300 + (totalQ > 0 ? pagadas/totalQ : 0)*450 + completados*20)
-    if (enMora) score = Math.max(300, score - 120)
-    score = Math.min(850, score)
-    const cls   = score >= 720 ? 'bajo' : score >= 580 ? 'medio' : 'alto'
-    const label = score >= 720 ? 'Paga a tiempo' : score >= 580 ? 'Demoras leves' : 'Alto riesgo'
-    return { score, label, cls }
-  }, [allLoans, loans])
-
   // FIX: solo mostrar clientes que tienen préstamos activos/mora Y al menos una cuota pendiente
   // O que tienen préstamos activos aunque estén al día (para poder ver historial)
   const grouped = useMemo(() => {
@@ -5278,8 +5288,6 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
     const deuda = pays.reduce((s,p) => s + Number(p.amount), 0)
     const cobradoCliente = cl.reduce((s,l) => s + Number(l.totalRecuperado || receipts.filter(r => r.loanId === l.id).reduce((sum,r) => sum + Number(r.amount || 0), 0)), 0)
     const totalEsperadoCliente = cobradoCliente + deuda
-    const { score, label, cls } = calcScore(selected.client)
-
     // Cuotas agrupadas por préstamo
     const cuotasByLoan = new Map()
     for (const l of cl) cuotasByLoan.set(l.id, [])
@@ -5296,7 +5304,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
 
         {/* Header ficha */}
         <div className="ficha-header">
-          <div className={`ficha-avatar pn-score-bg-${cls}`}>
+          <div className="ficha-avatar">
             {selected.client.split(' ').map(x=>x[0]).slice(0,2).join('')}
           </div>
           <div className="ficha-info">
@@ -5305,11 +5313,6 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
             <p style={{ fontSize:11, color:'#60646e' }}>{selected.address || 'Sin dirección'}</p>
           </div>
           <div className="ficha-actions">
-            <div className={`pn-score-arc pn-score-arc-${cls}`}>
-              <span className="pn-score-big">{score}</span>
-              <span className="pn-score-small">/850</span>
-            </div>
-            <span className={`pn-score-chip pn-score-${cls}`}>{label}</span>
             <div style={{ display:'flex', gap:7, marginTop:10, flexWrap:'wrap' }}>
               <button className="pn-btn-outline pn-btn-sm" onClick={() => onExportClient?.(selected)}>
                 <FileText size={12}/> Word
@@ -5494,7 +5497,6 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
             </motion.div>
           : <div className="pn-client-grid">
               {grouped.map((c, i) => {
-                const { score, label, cls } = calcScore(c.client)
                 const loanRefs = new Set(c.loans.map(l => l.id))
                 const cobrosCliente = payments.filter(p => loanRefs.has(p.loanId) && p.status !== 'Pagado')
                 const pendiente = cobrosCliente.reduce((s,p) => s+Number(p.amount), 0)
@@ -5509,7 +5511,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                     transition={{ delay:i*.04, type:'spring', stiffness:260, damping:22 }}
                     whileHover={{ y:-4 }}>
                     <div className="pn-client-card-top">
-                      <div className={`pn-client-avatar pn-score-bg-${cls}`}>
+                      <div className="pn-client-avatar">
                         {c.client.split(' ').map(x=>x[0]).slice(0,2).join('')}
                       </div>
                       <div style={{ display:'flex', gap:4 }}>
@@ -5520,10 +5522,6 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                     </div>
                     <h3 className="pn-client-name">{c.client}</h3>
                     <p className="pn-client-meta">{c.phone || '—'} · DNI {c.dni || '—'}</p>
-                    <div className="pn-score-row">
-                      <span className="pn-score-number">{score}<span className="pn-score-denom">/850</span></span>
-                      <span className={`pn-score-chip pn-score-${cls}`}>{label}</span>
-                    </div>
                     <div className="pn-client-metrics">
                       <div><small>Capital</small><b><Money value={capitalCliente}/></b></div>
                       <div><small>Cuotas</small><b>{cuotasPagadas}/{cuotasTotales}</b></div>

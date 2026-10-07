@@ -104,6 +104,16 @@
   transition: box-shadow .3s;
 }
 .brand-mark:hover { box-shadow: 0 0 35px #b347ff90, 0 0 70px #b347ff40 }
+.brand-mark-with-badge { position: relative; overflow: visible }
+.brand-notification-badge {
+  position: absolute; top: -7px; right: -8px; z-index: 2;
+  min-width: 19px; height: 19px; padding: 0 5px;
+  display: grid; place-items: center; border-radius: 999px;
+  background: #ff3864; color: #fff; border: 2px solid #111018;
+  font: 800 9px/1 var(--mono); box-shadow: 0 0 12px #ff386480;
+  animation: notification-pop .28s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes notification-pop { from { transform:scale(.5);opacity:0 } to { transform:scale(1);opacity:1 } }
 .brand b, .login-brand b { font: 800 20px var(--heading); letter-spacing: -1px; color: #f5f4f7 }
 .brand b span, .login-brand b span {
   background: linear-gradient(90deg, #b347ff, #e040fb, #00ff87);
@@ -229,6 +239,20 @@
 .breadcrumb span { margin: 0 10px; color: #3a3d47 }
 .breadcrumb b { font-weight: 500; color: #d8dae0 }
 .top-actions { display: flex; align-items: center; gap: 14px }
+.notification-toggle {
+  position: relative; width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center; border-radius: 10px;
+  color: #c8bfd8; background: rgba(179,71,255,.08);
+  border: 1px solid rgba(179,71,255,.2); cursor: pointer;
+  transition: color .2s, background .2s, border-color .2s, transform .2s;
+}
+.notification-toggle:hover { color:#fff; background:rgba(179,71,255,.18); border-color:rgba(179,71,255,.5); transform:translateY(-1px) }
+.notification-toggle span {
+  position:absolute; top:-6px; right:-7px; min-width:17px; height:17px;
+  padding:0 4px; display:grid; place-items:center; border:2px solid #0b0c11;
+  border-radius:999px; background:#ff3864; color:white;
+  font:800 8px/1 var(--mono); box-shadow:0 0 10px #ff386470;
+}
 .top-spinner { color: #b347ff }
 .icon-button, .more-button {
   width: 34px; height: 34px;
