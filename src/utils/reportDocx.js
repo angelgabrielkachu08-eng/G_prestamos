@@ -255,7 +255,7 @@ function download(blob, filename) {
    REPORTE DE PRÉSTAMOS
    opts: { loans, payments, ledger, titulo }
 ═══════════════════════════════════════════════════════════ */
-export async function exportReportDocxPrestamos({ loans = [], payments = [], ledger = [], titulo = 'Reporte General' }) {
+export async function exportReportDocxPrestamos({ loans = [], payments = [], ledger = [], receipts = [], promises = [], titulo = 'Reporte General' }) {
   const totalCapital  = loans.reduce((s, l) => s + Number(l.principal), 0)
   const totalRetorno  = loans.reduce((s, l) => s + Number(l.principal) * (1 + Number(l.rate) / 100), 0)
   const totalInteres  = totalRetorno - totalCapital
@@ -264,6 +264,7 @@ export async function exportReportDocxPrestamos({ loans = [], payments = [], led
   const enMora        = loans.filter(l => l.status === 'En mora').length
   const pendientes    = payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status))
   const montoPend     = pendientes.reduce((s, p) => s + Number(p.amount), 0)
+  const totalCobradoPeriodo = receipts.reduce((s, r) => s + Number(r.amount || 0), 0)
 
   const loanRows = loans.map(l => [
     [l.id,                       P.purpleL],
@@ -280,6 +281,22 @@ export async function exportReportDocxPrestamos({ loans = [], payments = [], led
     [m.type === 'Entrada' ? '▲ Entrada' : '▼ Salida', m.type === 'Entrada' ? P.greenL : P.red],
     [money(m.amount),                      m.type === 'Entrada' ? P.greenL : P.red],
     [m.time,                               P.muted],
+  ])
+  const receiptRows = receipts.slice(0, 100).map(r => [
+    [r.client, P.text],
+    [r.loanId, P.muted],
+    [`Cuota ${r.n ?? '—'}`, P.muted],
+    [dateOnly(r.paidAt || r.due), P.text],
+    [r.method || 'Efectivo', P.muted],
+    [money(r.amount), P.greenL],
+  ])
+  const promiseRows = promises.slice(0, 100).map(p => [
+    [p.client || 'Cliente', P.text],
+    [p.loanId || '—', P.muted],
+    [`Cuota ${p.n ?? '—'}`, P.muted],
+    [dateOnly(p.fecha), P.text],
+    [p.estado === 'cumplida' ? 'Cumplida' : p.estado === 'cancelada' ? 'Reprogramada' : 'Pendiente', p.estado === 'cumplida' ? P.greenL : p.estado === 'cancelada' ? P.muted : p.fecha < new Date().toISOString().slice(0,10) ? P.red : P.amber],
+    [p.nota || '—', P.muted],
   ])
 
   const doc = new Document({
@@ -337,11 +354,36 @@ export async function exportReportDocxPrestamos({ loans = [], payments = [], led
                 [`Cuota ${p.n}`,              P.muted],
                 [p.due,                       P.text],
                 [money(p.amount),             p.status === 'Vencido' ? P.red : P.amber],
-                [p.status === 'Vencido' ? '⚠ Vencida' : p.status === 'Parcial' ? '◑ Parcial' : '○ Pendiente',
+                [p.status === 'Vencido' ? `⚠ Vencida${p.partiallyPaid ? ' · abonó parte' : ''}` : p.status === 'Parcial' ? '◑ Parcial' : '○ Pendiente',
                   p.status === 'Vencido' ? P.red : P.amber],
               ]),
             )
           : para([run('Sin cuotas pendientes. ¡Todo al día!', { color: P.greenL, italic: true })]),
+
+        spacer(240),
+
+        /* Acuerdos de pago */
+        heading2('Promesas y acuerdos de pago', P.purpleL),
+        divider(),
+        spacer(80),
+        promiseRows.length > 0
+          ? makeTable(['Cliente', 'Préstamo', 'Cuota', 'Fecha acordada', 'Estado', 'Nota'], promiseRows, P.purpleL)
+          : para([run('No hay promesas registradas para este reporte.', { color:P.muted, italic:true })]),
+
+        spacer(240),
+
+        /* Cobros recibidos en el período */
+        heading2('Cobros recibidos en el período', P.greenL),
+        divider(),
+        spacer(80),
+        para([
+          run(`Total recibido: `, { size:20, color:P.muted }),
+          run(money(totalCobradoPeriodo), { size:22, bold:true, color:P.greenL }),
+          run(`  ·  ${receipts.length} pago${receipts.length === 1 ? '' : 's'} registrado${receipts.length === 1 ? '' : 's'}`, { size:18, color:P.muted }),
+        ], { after:120 }),
+        receiptRows.length > 0
+          ? makeTable(['Cliente', 'Préstamo', 'Cuota', 'Fecha de pago', 'Medio', 'Importe'], receiptRows, P.greenL)
+          : para([run('No hay pagos recibidos dentro del período seleccionado.', { color:P.muted, italic:true })]),
 
         spacer(240),
 

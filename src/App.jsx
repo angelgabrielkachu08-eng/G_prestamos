@@ -19,7 +19,7 @@ import { isSupabaseConfigured } from './lib/supabase'
 import { calcularPrestamoDirecto } from './utils/loanCalculator'
 import {
   signInWithGoogle, signOut as supabaseSignOut, getSession, onAuthStateChange,
-  cargarCarteraCompleta, crearPrestamo, registrarPago,
+  cargarCarteraCompleta, crearPrestamo, registrarPago, cargarPromesasPago, crearPromesaPago,
   buscarClientesPorNombre, actualizarCliente,
   cargarHistorialPrestamos, cobradoPorMes,
   // Módulo ventas
@@ -1116,6 +1116,9 @@ export default function App() {
   const [monthBars, setMonthBars]         = useState(Array(12).fill(0))
   const [modal, setModal]                 = useState(null) // 'loan'|null
   const [partialTarget, setPartialTarget] = useState(null)
+  const [paymentConfirmTarget, setPaymentConfirmTarget] = useState(null)
+  const [paymentPromises, setPaymentPromises] = useState([])
+  const [promiseTarget, setPromiseTarget] = useState(null)
   const [editTarget, setEditTarget]       = useState(null) // cliente a editar
   const [cmdOpen, setCmdOpen]             = useState(false)
   const [tourOpen, setTourOpen]           = useState(false)
@@ -1182,7 +1185,7 @@ export default function App() {
     setLoading(true)
     setDataError(null)
     try {
-      const [cartera, historial, bars, prods, vtas, rutaUni, stockResult] = await Promise.all([
+      const [cartera, historial, bars, prods, vtas, rutaUni, stockResult, promises] = await Promise.all([
         cargarCarteraCompleta(uid),
         cargarHistorialPrestamos(uid),
         cobradoPorMes(uid),
@@ -1190,12 +1193,14 @@ export default function App() {
         cargarVentas(uid),
         cargarCuotasUnificadas(uid),
         cargarMovimientosStock(uid).then(data => ({ data })).catch(error => ({ error })),
+        cargarPromesasPago(uid),
       ])
       if (requestVersion !== dataLoadVersion.current) return
       setLoans(cartera.loans)
       setPayments(cartera.payments)
       setLedger(cartera.ledger)
       setReceipts(cartera.receipts)
+      setPaymentPromises(promises)
       setAllLoans(historial)
       setMonthBars(bars)
       setProductos(prods)
@@ -1290,7 +1295,7 @@ export default function App() {
     try {
       await supabaseSignOut()
       dataLoadVersion.current += 1
-      setLoans([]); setPayments([]); setLedger([]); setReceipts([])
+      setLoans([]); setPayments([]); setLedger([]); setReceipts([]); setPaymentPromises([])
       setAllLoans([]); setMonthBars(Array(12).fill(0))
       setProductos([]); setVentas([]); setRutaUnificada([]); setPapelera([])
       setModo(null); setTab('dashboard'); setModal(null); setDataError(null)
@@ -1313,11 +1318,13 @@ export default function App() {
       setPayments((prev) => prev.map((p) => {
         if (p.id !== payment.id) return p
         if (finalStatus === 'Pagado') return null
-        return { ...p, status: 'Parcial', amount: Math.max(0, Number(p.amount) - importeNum) }
+        const statusRestante = daysUntil(p.due) < 0 ? 'Vencido' : 'Parcial'
+        return { ...p, status:statusRestante, partiallyPaid:true, paidAmount:Number(p.paidAmount || 0) + importeNum, amount:Math.max(0, Number(p.amount) - importeNum) }
       }).filter(Boolean))
       setReceipts((prev) => [{ id: pago.referencia, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt: new Date().toISOString(), status: 'Pagado', n: payment.n, method: 'efectivo', origen: payment.origen ?? 'efectivo' }, ...prev])
       setLedger((prev) => [{ id: pago.movimientoCajaId ?? pago.referencia, label: `Cobro · ${payment.client}`, type: 'Entrada', amount: importeNum, time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), rawDate: new Date().toISOString(), origen: (payment.origen ?? 'efectivo') }, ...prev])
       const paidIncrement = finalStatus === 'Pagado' ? 1 : 0
+      if (paidIncrement) setPaymentPromises(prev => prev.map(item => item.cuotaId === payment.id && item.estado === 'pendiente' ? { ...item, estado:'cumplida' } : item))
       const advanceLoan = (loan) => {
         if (loan.id !== payment.loanId) return loan
         const paid = Math.min(Number(loan.installments) || Number.MAX_SAFE_INTEGER, (Number(loan.paid) || 0) + paidIncrement)
@@ -1334,6 +1341,23 @@ export default function App() {
       return true
     } catch (err) { showToast(`No se pudo registrar: ${err.message}`, 'error'); return false }
     finally { paymentLocks.current.delete(payment.id) }
+  }
+
+  const requestPaymentConfirmation = (payment) => {
+    if (!payment?.id || paymentLocks.current.has(payment.id)) return
+    setPaymentConfirmTarget(payment)
+  }
+
+  const handleCreatePaymentPromise = async (payment, form) => {
+    try {
+      const promise = await crearPromesaPago(payment, form)
+      setPaymentPromises(prev => [promise, ...prev.map(item => item.cuotaId === promise.cuotaId && item.estado === 'pendiente' ? { ...item, estado:'cancelada' } : item)])
+      showToast(`Promesa guardada para el ${new Date(`${promise.fecha}T12:00:00`).toLocaleDateString('es-AR')}`)
+      return true
+    } catch (err) {
+      showToast(`No se pudo guardar la promesa: ${friendlyConnectionError(err.message)}`, 'error')
+      return false
+    }
   }
 
   const handleCreateLoan = async (form) => {
@@ -1517,11 +1541,13 @@ export default function App() {
         await exportReportDocxVentas({ ventas: ventasCliente, ledger: ledgerCliente, loans:loansCliente, payments:paymentsCliente, titulo: `Ficha de ${cliente.client}` })
       } else {
         const loansCliente = allLoansEfectivo.filter(l => l.clienteId === cliente.clienteId || l.client === cliente.client)
-        const paysCliente = paymentsEfectivo.filter(p => p.client === cliente.client)
         const loanRefs = loansCliente.map(l => l.id).filter(Boolean)
+        const paysCliente = paymentsEfectivo.filter(p => loanRefs.includes(p.loanId))
+        const receiptsCliente = receiptsEfectivo.filter(r => loanRefs.includes(r.loanId))
+        const promisesCliente = paymentPromises.filter(p => loanRefs.includes(p.loanId))
         const ledgerCliente = ledgerEfectivo.filter(m => !m.voided && loanRefs.some(ref => m.label?.includes(ref)))
         const { exportReportDocxPrestamos } = await import('./utils/reportDocx')
-        await exportReportDocxPrestamos({ loans: loansCliente, payments: paysCliente, ledger: ledgerCliente, titulo: `Ficha de ${cliente.client}` })
+        await exportReportDocxPrestamos({ loans: loansCliente, payments: paysCliente, ledger: ledgerCliente, receipts: receiptsCliente, promises:promisesCliente, titulo: `Ficha de ${cliente.client}` })
       }
       showToast('Reporte Word del cliente descargado')
     } catch (err) { showToast(`No se pudo generar el Word: ${err.message}`, 'error') }
@@ -1633,10 +1659,16 @@ export default function App() {
       } catch (err) { showToast(`Error al generar reporte: ${err.message}`, 'error') }
     } else {
       // ── Reporte de PRÉSTAMOS ──
-      const loansF    = alcance === 'cliente' ? loansEfectivo.filter(l => l.client === clienteFiltro) : loansEfectivo
-      const paymentsF = alcance === 'cliente' ? paymentsEfectivo.filter(p => p.client === clienteFiltro) : paymentsEfectivo
-      const ledgerF   = ledgerEfectivo.filter(m => !m.voided && enRango(m.rawDate))
-      const receiptsF = receiptsEfectivo.filter(r => enRango(r.paidAt) && (alcance !== 'cliente' || r.client === clienteFiltro))
+      const loansF = allLoansEfectivo.filter(l =>
+        (alcance !== 'cliente' || l.client === clienteFiltro) &&
+        (alcance !== 'fechas' || enRango(l.createdAt))
+      )
+      const loanRefs = new Set(loansF.map(l => l.id))
+      const paymentsF = paymentsEfectivo.filter(p => loanRefs.has(p.loanId))
+      const ledgerF = ledgerEfectivo.filter(m => !m.voided && enRango(m.rawDate) &&
+        (alcance !== 'cliente' || [...loanRefs].some(ref => String(m.label || '').includes(ref))))
+      const receiptsF = receiptsEfectivo.filter(r => enRango(r.paidAt) && (alcance !== 'cliente' || loanRefs.has(r.loanId)))
+      const promisesF = paymentPromises.filter(p => loanRefs.has(p.loanId) && enRango(p.fecha))
       const titulo    = alcance === 'cliente' ? `Cliente: ${clienteFiltro}` : desde || hasta ? `Del ${desde ?? '—'} al ${hasta ?? '—'}` : 'Reporte de Préstamos'
       try {
         if (formato === 'excel') {
@@ -1645,12 +1677,12 @@ export default function App() {
           showToast('Excel descargado')
         } else {
           const { exportReportDocxPrestamos } = await import('./utils/reportDocx')
-          await exportReportDocxPrestamos({ loans: loansF, payments: paymentsF, ledger: ledgerF, titulo })
+          await exportReportDocxPrestamos({ loans: loansF, payments: paymentsF, ledger: ledgerF, receipts: receiptsF, promises:promisesF, titulo })
           showToast('Word descargado')
         }
       } catch (err) { showToast(`Error al generar reporte: ${err.message}`, 'error') }
     }
-  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receiptsEfectivo, allLoans, payments, showToast])
+  }, [modo, allLoansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receiptsEfectivo, paymentPromises, allLoans, payments, showToast])
 
   /* ── Auth screens ── */
   if (!authReady) return (
@@ -1766,10 +1798,10 @@ export default function App() {
             <motion.div key={tab} initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }} transition={{ duration:0.18, ease:'easeOut' }}>
 
               {/* ── MÓDULO PRÉSTAMOS ── */}
-              {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={handlePay} />}
+              {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={requestPaymentConfirmation} />}
               {tab === 'p_nuevo'    && <LoanModal inline onClose={() => setTab('p_inicio')} onCreate={handleCreateLoan} userId={user?.id} />}
-              {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} loading={loading} onPay={handlePay} onPartial={setPartialTarget} />}
-              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={handlePay} onPartial={setPartialTarget} payments={paymentsEfectivo} />}
+              {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} promises={paymentPromises} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} />}
+              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} />}
 
@@ -1808,7 +1840,7 @@ export default function App() {
         {exportOpen && (
           <ExportModal
             modo={modo}
-            loans={loansEfectivo}
+            loans={allLoansEfectivo}
             ventas={ventas}
             onClose={() => setExportOpen(false)}
             onGenerate={(opts) => { handleGenerarReporte(opts); setExportOpen(false) }}
@@ -1828,6 +1860,20 @@ export default function App() {
         {partialTarget && <PartialModal payment={partialTarget} onClose={() => setPartialTarget(null)} onConfirm={async (amt) => {
           const saved = await handlePay(partialTarget, 'Parcial', amt)
           if (saved) setPartialTarget(null)
+          return saved
+        }} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {paymentConfirmTarget && <PaymentConfirmModal payment={paymentConfirmTarget} onClose={() => setPaymentConfirmTarget(null)} onConfirm={async () => {
+          const saved = await handlePay(paymentConfirmTarget, 'Pagado')
+          if (saved) setPaymentConfirmTarget(null)
+          return saved
+        }} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {promiseTarget && <PaymentPromiseModal payment={promiseTarget} onClose={() => setPromiseTarget(null)} onConfirm={async form => {
+          const saved = await handleCreatePaymentPromise(promiseTarget, form)
+          if (saved) setPromiseTarget(null)
           return saved
         }} />}
       </AnimatePresence>
@@ -3516,6 +3562,54 @@ function PartialModal({ payment, onClose, onConfirm }) {
   )
 }
 
+function PaymentConfirmModal({ payment, onClose, onConfirm }) {
+  const [saving, setSaving] = useState(false)
+  async function confirm() {
+    setSaving(true)
+    try { await onConfirm() } finally { setSaving(false) }
+  }
+  return createPortal(
+    <motion.div className="modal-backdrop" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onClick={e => e.target === e.currentTarget && !saving && onClose()}>
+      <motion.div className="loan-modal pn-payment-confirm" role="dialog" aria-modal="true" aria-labelledby="payment-confirm-title" initial={{ y:18, opacity:0, scale:.97 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:12, opacity:0, scale:.98 }}>
+        <div className="modal-header"><span className="pn-payment-confirm-icon"><HandCoins size={18}/></span><span id="payment-confirm-title">Confirmar cobro</span><button type="button" className="icon-button" onClick={onClose} disabled={saving} style={{ marginLeft:'auto' }} aria-label="Cerrar"><X size={16}/></button></div>
+        <div className="modal-body">
+          <p>Vas a registrar el pago completo de esta cuota. El saldo y la caja se actualizarán juntos.</p>
+          <div className="pn-payment-confirm-summary"><span>{payment.client}</span><small>{payment.loanId} · Cuota {payment.n}/{payment.totalQuotas || '—'} · Vence {payment.due || '—'}</small><b><Money value={payment.amount}/></b>{payment.partiallyPaid && <small>Incluye pagos parciales anteriores; este es el saldo restante.</small>}</div>
+        </div>
+        <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Volver</button><button type="button" className="primary-button" onClick={confirm} disabled={saving}>{saving?<Spinner size={14}/>:<Check size={14}/>} Registrar cobro</button></div>
+      </motion.div>
+    </motion.div>, document.body
+  )
+}
+
+function PaymentPromiseModal({ payment, onClose, onConfirm }) {
+  const [fecha, setFecha] = useState(payment.due && payment.due >= today ? payment.due : today)
+  const [nota, setNota] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  async function submit(e) {
+    e.preventDefault()
+    if (!fecha || fecha < today) { setError('Elegí hoy o una fecha futura.'); return }
+    setSaving(true)
+    try { const ok = await onConfirm({ fecha, nota }); if (!ok) setError('No se pudo guardar. Revisá la conexión e intentá otra vez.') }
+    finally { setSaving(false) }
+  }
+  return createPortal(
+    <motion.div className="modal-backdrop" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={e=>e.target===e.currentTarget&&!saving&&onClose()}>
+      <motion.form className="loan-modal pn-payment-confirm" onSubmit={submit} initial={{y:18,opacity:0,scale:.97}} animate={{y:0,opacity:1,scale:1}} exit={{y:12,opacity:0,scale:.98}}>
+        <div className="modal-header"><span className="pn-payment-confirm-icon pn-promise-icon"><Calendar size={18}/></span><span>Registrar promesa de pago</span><button type="button" className="icon-button" onClick={onClose} disabled={saving} style={{marginLeft:'auto'}} aria-label="Cerrar"><X size={16}/></button></div>
+        <div className="modal-body">
+          <p>Guardá la fecha acordada para hacer seguimiento. Esto no registra un cobro ni modifica la deuda.</p>
+          <div className="pn-payment-confirm-summary"><span>{payment.client}</span><small>{payment.loanId} · Cuota {payment.n}/{payment.totalQuotas || '—'} · Saldo actual</small><b><Money value={payment.amount}/></b></div>
+          <div className="form-grid" style={{marginTop:14}}><Field label="Fecha acordada" type="date" value={fecha} onChange={e=>setFecha(e.target.value)} min={today} required/><Field label="Nota opcional" value={nota} onChange={e=>setNota(e.target.value)} placeholder="Horario, detalle del acuerdo…" maxLength={240}/></div>
+          {error && <p className="pn-field-error pn-field-error-block" role="alert">{error}</p>}
+        </div>
+        <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}>{saving?<Spinner size={14}/>:<Calendar size={14}/>} Guardar promesa</button></div>
+      </motion.form>
+    </motion.div>, document.body
+  )
+}
+
 /* ═══════════════════════════════════════════════════════════════
    EDIT CLIENT MODAL
 ═══════════════════════════════════════════════════════════════ */
@@ -3571,16 +3665,34 @@ function EditClientModal({ client, onClose, onSave }) {
 /* ═══════════════════════════════════════════════════════════════
    RUTA DIA — ruta de cobro del día
 ═══════════════════════════════════════════════════════════════ */
-function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
+function RutaDia({ payments = [], promises = [], loading = false, onPay, onPartial, onPromise }) {
+  const [filtro, setFiltro] = useState('Urgentes')
+  const [q, setQ] = useState('')
   const cobros = useMemo(() => {
-    const pending  = payments.filter(p => p.status !== 'Pagado')
-    const overdue  = pending.filter(p => daysUntil(p.due) < 0).sort((a,b) => daysUntil(a.due)-daysUntil(b.due))
-    const todayDue = pending.filter(p => daysUntil(p.due) === 0)
-    const tomorrow = pending.filter(p => daysUntil(p.due) === 1)
-    return [...overdue, ...todayDue, ...tomorrow]
-  }, [payments])
+    const term = q.trim().toLowerCase()
+    return payments.filter(p => {
+      const d = daysUntil(p.due)
+      const isPending = ['Pendiente','Vencido','Parcial'].includes(p.status)
+      const promesa = promises.filter(item => item.cuotaId === p.id && item.estado === 'pendiente').sort((a,b) => String(b.creada || '').localeCompare(String(a.creada || '')))[0]
+      const dp = promesa ? daysUntil(promesa.fecha) : Infinity
+      const matchesFilter = filtro === 'Todo' ? isPending
+        : filtro === 'Urgentes' ? d <= 7 || dp <= 0
+        : filtro === 'Vencidas' ? d < 0 || dp < 0
+          : filtro === '7+ días' ? d <= -7
+            : filtro === '30+ días' ? d <= -30
+          : filtro === 'Hoy' ? d === 0 || dp === 0
+                : d >= 0 && d <= 7
+      const matchesQuery = !term || [p.client,p.phone,p.loanId].some(v => String(v || '').toLowerCase().includes(term))
+      return isPending && matchesFilter && matchesQuery
+    }).map(p => ({...p, promesa:promises.filter(item => item.cuotaId === p.id && item.estado === 'pendiente').sort((a,b) => String(b.creada || '').localeCompare(String(a.creada || '')))[0] || null}))
+      .sort((a,b) => Math.min(daysUntil(a.due),a.promesa ? daysUntil(a.promesa.fecha) : Infinity)-Math.min(daysUntil(b.due),b.promesa ? daysUntil(b.promesa.fecha) : Infinity) || a.client.localeCompare(b.client, 'es'))
+  }, [payments, promises, filtro, q])
 
   const totalPendiente = cobros.reduce((s,p) => s + Number(p.amount), 0)
+  const vencidos = payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && daysUntil(p.due) < 0)
+  const totalVencido = vencidos.reduce((s,p) => s + Number(p.amount || 0), 0)
+  const promesasHoy = promises.filter(p => p.estado === 'pendiente' && p.fecha === today).length
+  const promesasAtrasadas = promises.filter(p => p.estado === 'pendiente' && p.fecha < today).length
 
   return (
     <div className="pn-section">
@@ -3596,6 +3708,18 @@ function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
         </div>
       </div>
 
+      <div className="pn-collection-overview">
+        <div><small>Cuotas vencidas</small><b className="text-red">{vencidos.length}</b></div>
+        <div><small>Saldo vencido</small><b className="text-red"><Money value={totalVencido}/></b></div>
+        <div><small>Saldo en esta vista</small><b><Money value={totalPendiente}/></b></div>
+        <div><small>Promesas para hoy</small><b className="text-purple">{promesasHoy}</b></div>
+        <div><small>Promesas atrasadas</small><b className={promesasAtrasadas ? 'text-red' : 'text-green'}>{promesasAtrasadas}</b></div>
+      </div>
+      <div className="pn-toolbar pn-ruta-toolbar">
+        <label className="pn-searchbox"><Search size={14}/><input placeholder="Buscar cliente, teléfono o préstamo…" value={q} onChange={e => setQ(e.target.value)}/></label>
+        <div className="pn-filter-pills">{['Urgentes','Todo','Vencidas','7+ días','30+ días','Hoy'].map(f => <button key={f} className={`pn-pill ${filtro===f?'pn-pill-active-green':''}`} onClick={() => setFiltro(f)}>{f}</button>)}</div>
+      </div>
+
       {loading ? (
         <div className="pn-ruta-list">{[1,2,3].map(i=><div key={i} className="pn-ruta-sk"/>)}</div>
       ) : cobros.length === 0 ? (
@@ -3605,7 +3729,7 @@ function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
             <CheckCheck size={30}/>
           </motion.div>
           <h3>¡Todo al día!</h3>
-          <p>No hay cobros urgentes para hoy.</p>
+          <p>{filtro === 'Urgentes' ? 'No hay cuotas vencidas, de hoy o de los próximos 7 días.' : 'No hay cuotas para este filtro.'}</p>
         </motion.div>
       ) : (
         <div className="pn-ruta-list">
@@ -3613,11 +3737,13 @@ function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
             const dias    = daysUntil(p.due)
             const vencida = dias < 0
             const esHoy   = dias === 0
+            const promesa = p.promesa
+            const promesaAtrasada = promesa && promesa.fecha < today
             const phone   = sanitizePhone(p.phone || '')
             const waMsg   = encodeURIComponent(`Hola ${p.client.split(' ')[0]}, te recordamos que tenés una cuota de ${fmt(p.amount)} que vence ${esHoy?'hoy':p.due}. PrestaNeo.`)
             return (
               <motion.div key={p.id}
-                className={`pn-ruta-card ${vencida?'pn-ruta-vencida':esHoy?'pn-ruta-hoy':''}`}
+                className={`pn-ruta-card ${vencida || promesaAtrasada ? 'pn-ruta-vencida' : esHoy?'pn-ruta-hoy':''}`}
                 initial={{ opacity:0, x:-20 }} animate={{ opacity:1, x:0 }}
                 transition={{ delay:i*.06, type:'spring', stiffness:300, damping:26 }}>
                 {/* Indicador lateral de urgencia */}
@@ -3633,13 +3759,16 @@ function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
                         <span>·</span>
                         <span>Cuota {p.n}/{p.totalQuotas}</span>
                         <span>·</span>
-                        {vencida
-                          ? <span className="pn-badge-red"><CircleAlert size={9}/> {Math.abs(dias)}d vencida</span>
+                        {promesaAtrasada && !vencida
+                          ? <span className="pn-badge-red"><CircleAlert size={9}/> Promesa atrasada</span>
+                          : vencida
+                          ? <span className="pn-badge-red"><CircleAlert size={9}/> {Math.abs(dias)}d de atraso</span>
                           : esHoy
                             ? <span className="pn-badge-amber"><Clock size={9}/> Hoy</span>
                             : <span className="pn-badge-dim">Mañana</span>
                         }
-                        {p.status === 'Parcial' && <span className="pn-badge-purple">Parcial</span>}
+                        {(p.partiallyPaid || p.status === 'Parcial') && <span className="pn-badge-purple">Ya abonó parte</span>}
+                        {promesa && <span className={`pn-promise-badge ${promesa.fecha < today ? 'is-late' : ''}`}><Calendar size={10}/> Prometió {new Date(`${promesa.fecha}T12:00:00`).toLocaleDateString('es-AR')}</span>}
                       </div>
                     </div>
                   </div>
@@ -3666,6 +3795,7 @@ function RutaDia({ payments = [], loading = false, onPay, onPartial }) {
                   <button className="pn-btn-partial" onClick={() => onPartial(p)} title="Pago parcial">
                     <MoreHorizontal size={14}/>
                   </button>
+                  <button type="button" className="pn-btn-icon pn-promise-action" onClick={() => onPromise(p)} title="Registrar promesa de pago" aria-label="Registrar promesa de pago"><Calendar size={14}/></button>
                   <motion.button className="pn-btn-cobrar"
                     onClick={() => onPay(p, 'Pagado')}
                     whileHover={{ scale:1.05 }} whileTap={{ scale:.95 }}>
@@ -5099,7 +5229,7 @@ function LegalDialog({ section = 'terms', onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES PRESTAMOS
 ═══════════════════════════════════════════════════════════════ */
-function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, payments = [] }) {
+function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, onPromise, payments = [], receipts = [], promises = [] }) {
   const [q,        setQ]   = useState('')
   const [selected, setSel] = useState(null)
   const [expandedInstallment, setExpandedInstallment] = useState(null)
@@ -5123,9 +5253,12 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
   // O que tienen préstamos activos aunque estén al día (para poder ver historial)
   const grouped = useMemo(() => {
     const map = new Map()
-    for (const l of loans) {
-      if (!map.has(l.client)) map.set(l.client, { ...l, count:0, hayPendiente:false })
-      const entry = map.get(l.client)
+    const clientLoans = allLoans.length ? allLoans : loans
+    for (const l of clientLoans) {
+      const key = l.clienteId || l.client
+      if (!map.has(key)) map.set(key, { ...l, count:0, hayPendiente:false, loans:[] })
+      const entry = map.get(key)
+      entry.loans.push(l)
       entry.count++
       // Verificar si tiene cuotas pendientes
       if (payments.some(p => p.loanId === l.id && p.status !== 'Pagado')) {
@@ -5134,17 +5267,22 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
     }
     return [...map.values()]
       .filter(c => !q.trim() || c.client.toLowerCase().includes(q.toLowerCase()))
-  }, [loans, payments, q])
+      .sort((a,b) => a.client.localeCompare(b.client, 'es', { sensitivity:'base' }))
+  }, [loans, allLoans, payments, q])
 
   // ─── FICHA DE CLIENTE ───────────────────────────────────
   if (selected) {
-    const cl   = allLoans.filter(l => l.client === selected.client)
-    const pays = payments.filter(p => p.client === selected.client && p.status !== 'Pagado')
+    const cl   = allLoans.filter(l => selected.clienteId ? l.clienteId === selected.clienteId : l.client === selected.client).sort((a,b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    const loanRefs = new Set(cl.map(l => l.id))
+    const pays = payments.filter(p => loanRefs.has(p.loanId) && p.status !== 'Pagado')
     const deuda = pays.reduce((s,p) => s + Number(p.amount), 0)
+    const cobradoCliente = cl.reduce((s,l) => s + Number(l.totalRecuperado || receipts.filter(r => r.loanId === l.id).reduce((sum,r) => sum + Number(r.amount || 0), 0)), 0)
+    const totalEsperadoCliente = cobradoCliente + deuda
     const { score, label, cls } = calcScore(selected.client)
 
     // Cuotas agrupadas por préstamo
     const cuotasByLoan = new Map()
+    for (const l of cl) cuotasByLoan.set(l.id, [])
     for (const p of pays) {
       if (!cuotasByLoan.has(p.loanId)) cuotasByLoan.set(p.loanId, [])
       cuotasByLoan.get(p.loanId).push(p)
@@ -5196,6 +5334,8 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
         {/* Strip de métricas */}
         <div className="pn-ficha-strip">
           <div><small>Deuda pendiente</small><b className="text-red"><Money value={deuda}/></b></div>
+          <div><small>Total a devolver</small><b><Money value={totalEsperadoCliente}/></b></div>
+          <div><small>Total cobrado</small><b className="text-green"><Money value={cobradoCliente}/></b></div>
           <div><small>Préstamos totales</small><b>{cl.length}</b></div>
           <div><small>Cuotas pendientes</small><b>{pays.length}</b></div>
         </div>
@@ -5214,6 +5354,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                     const dias    = daysUntil(p.due)
                     const vencida = dias < 0 || p.status === 'Vencido'
                     const esHoy   = dias === 0
+                    const promesa = promises.filter(item => item.cuotaId === p.id && item.estado === 'pendiente').sort((a,b) => String(b.creada || '').localeCompare(String(a.creada || '')))[0]
                     return (
                       <div key={p.id} className="ficha-cuota-item">
                       <button type="button" className={`ficha-cuota-row ${vencida ? 'ficha-cuota-vencida' : esHoy ? 'ficha-cuota-hoy' : ''}`} aria-expanded={expandedInstallment === p.id} aria-controls={`cuota-actions-${p.id}`} onClick={() => setExpandedInstallment(expandedInstallment === p.id ? null : p.id)}>
@@ -5222,7 +5363,8 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                           <span className="ficha-cuota-date">{p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'Sin vencimiento'}</span>
                           {vencida && <span className="pn-badge-red">{Math.abs(dias)}d vencida</span>}
                           {esHoy && !vencida && <span className="pn-badge-amber">Hoy</span>}
-                          {p.status === 'Parcial' && <span className="pn-badge-purple">Parcial</span>}
+                          {(p.partiallyPaid || p.status === 'Parcial') && <span className="pn-badge-purple">Con pago parcial</span>}
+                          {promesa && <span className={`pn-promise-badge ${promesa.fecha < today ? 'is-late' : ''}`}><Calendar size={10}/> Prometió {new Date(`${promesa.fecha}T12:00:00`).toLocaleDateString('es-AR')}</span>}
                         </div>
                         <div className="ficha-cuota-right">
                           <span className={`ficha-cuota-amt ${vencida ? 'text-red' : ''}`}><Money value={p.amount}/></span>
@@ -5233,14 +5375,28 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                         <div id={`cuota-actions-${p.id}`} className="ficha-cuota-actions">
                           <button type="button" className="ficha-action-pay" onClick={() => onPay?.(p, 'Pagado')}><Check size={15}/> Cobrar completa</button>
                           <button type="button" className="ficha-action-partial" onClick={() => onPartial?.(p)}><HandCoins size={15}/> Cobrar por partes</button>
+                          <button type="button" className="ficha-action-promise" onClick={() => onPromise?.(p)}><Calendar size={15}/> Registrar promesa</button>
                           {sanitizePhone(p.phone || selected.phone) ? (
-                            <a className="ficha-action-whatsapp" href={`https://wa.me/${sanitizePhone(p.phone || selected.phone)}?text=${encodeURIComponent(`Hola ${selected.client.split(' ')[0]}, te recordamos que la cuota ${p.n} de tu préstamo vence el ${p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'próximamente'}. Importe pendiente: $${Number(p.amount || 0).toLocaleString('es-AR')}. Si ya abonaste, podés ignorar este mensaje.`)}`} target="_blank" rel="noreferrer"><MessageCircle size={15}/> Avisar por WhatsApp</a>
+                            <a className="ficha-action-whatsapp" href={`https://wa.me/${sanitizePhone(p.phone || selected.phone)}?text=${encodeURIComponent(`Hola ${selected.client.split(' ')[0]}, te recordamos la cuota ${p.n} de tu préstamo${promesa ? `, con pago acordado para el ${new Date(`${promesa.fecha}T12:00:00`).toLocaleDateString('es-AR')}` : `, con vencimiento el ${p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'próximamente'}`}. Importe pendiente: $${Number(p.amount || 0).toLocaleString('es-AR')}. Si ya abonaste, podés ignorar este mensaje.`)}`} target="_blank" rel="noreferrer"><MessageCircle size={15}/> Avisar por WhatsApp</a>
                           ) : <span className="ficha-action-no-phone"><Phone size={14}/> Agregá un teléfono para enviar el aviso</span>}
                         </div>
                       )}
                       </div>
                     )
                   })}
+                  {receipts.some(r => r.loanId === loanId) && (
+                    <details className="pn-payment-history">
+                      <summary><History size={13}/> Historial de pagos ({receipts.filter(r => r.loanId === loanId).length})</summary>
+                      <div className="pn-payment-history-list">
+                        {receipts.filter(r => r.loanId === loanId).sort((a,b) => String(b.paidAt || '').localeCompare(String(a.paidAt || ''))).map(r => (
+                          <div className="pn-payment-history-row" key={r.dbId || r.id}>
+                            <span><b>Cuota {r.n ?? '—'}</b><small>{r.paidAt ? new Date(r.paidAt).toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' }) : 'Fecha sin dato'} · {r.method || 'Efectivo'} · {r.id}</small></span>
+                            <strong className="text-green"><Money value={r.amount}/></strong>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               ))}
             </div>
@@ -5256,15 +5412,22 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
             <div className="table-scroll">
               <table className="pn-table">
                 <thead><tr>
-                  <th>REFERENCIA</th><th>CAPITAL</th><th>PROGRESO</th><th>ESTADO</th><th></th>
+                  <th>REFERENCIA</th><th>CAPITAL</th><th>TOTAL A DEVOLVER</th><th>COBRADO</th><th>SALDO</th><th>PROGRESO</th><th>PRÓXIMO VENCIMIENTO</th><th>ESTADO</th><th></th>
                 </tr></thead>
                 <tbody>
                   {cl.map(l => {
                     const cuotasLoan = payments.filter(p => p.loanId === l.id)
+                    const saldoLoan = cuotasLoan.reduce((s,p) => s + Number(p.amount || 0), 0)
+                    const recuperadoLoan = Number(l.totalRecuperado || receipts.filter(r => r.loanId === l.id).reduce((s,r) => s + Number(r.amount || 0), 0))
+                    const totalLoan = recuperadoLoan + saldoLoan
+                    const proximoVencimiento = cuotasLoan.slice().sort((a,b) => String(a.due).localeCompare(String(b.due)))[0]?.due
                     return (
                       <tr key={l.id}>
                         <td className="mono pn-td-muted">{l.id}</td>
                         <td className="pn-td-money"><Money value={l.principal}/></td>
+                        <td><Money value={totalLoan}/></td>
+                        <td className="pn-td-green"><Money value={recuperadoLoan}/></td>
+                        <td className={saldoLoan > 0 ? 'pn-td-money' : 'pn-td-green'}><Money value={saldoLoan}/></td>
                         <td>
                           <div className="pn-progress-cell">
                             <span>{l.paid}/{l.installments}</span>
@@ -5273,6 +5436,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                             </div>
                           </div>
                         </td>
+                        <td>{proximoVencimiento ? new Date(`${proximoVencimiento}T12:00:00`).toLocaleDateString('es-AR') : '—'}</td>
                         <td><Status status={l.status}/></td>
                         <td>
                           <button className="pn-btn-icon" title="Comprobante Word"
@@ -5331,11 +5495,16 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
           : <div className="pn-client-grid">
               {grouped.map((c, i) => {
                 const { score, label, cls } = calcScore(c.client)
-                const pendiente = payments.filter(p => p.client === c.client && p.status !== 'Pagado').reduce((s,p) => s+Number(p.amount), 0)
-                const cuotasVenc = payments.filter(p => p.client === c.client && p.status === 'Vencido').length
-                const cuotasHoy  = payments.filter(p => p.client === c.client && daysUntil(p.due) === 0 && p.status !== 'Pagado').length
+                const loanRefs = new Set(c.loans.map(l => l.id))
+                const cobrosCliente = payments.filter(p => loanRefs.has(p.loanId) && p.status !== 'Pagado')
+                const pendiente = cobrosCliente.reduce((s,p) => s+Number(p.amount), 0)
+                const cuotasVenc = cobrosCliente.filter(p => daysUntil(p.due) < 0).length
+                const cuotasHoy  = cobrosCliente.filter(p => daysUntil(p.due) === 0).length
+                const capitalCliente = c.loans.reduce((s,l) => s + Number(l.principal || 0), 0)
+                const cuotasPagadas = c.loans.reduce((s,l) => s + Number(l.paid || 0), 0)
+                const cuotasTotales = c.loans.reduce((s,l) => s + Number(l.installments || 0), 0)
                 return (
-                  <motion.article key={c.client} className="pn-client-card"
+                  <motion.article key={c.clienteId || c.client} className="pn-client-card"
                     initial={{ opacity:0, y:18 }} animate={{ opacity:1, y:0 }}
                     transition={{ delay:i*.04, type:'spring', stiffness:260, damping:22 }}
                     whileHover={{ y:-4 }}>
@@ -5356,8 +5525,8 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                       <span className={`pn-score-chip pn-score-${cls}`}>{label}</span>
                     </div>
                     <div className="pn-client-metrics">
-                      <div><small>Capital</small><b><Money value={c.principal}/></b></div>
-                      <div><small>Cuotas</small><b>{c.paid}/{c.installments}</b></div>
+                      <div><small>Capital</small><b><Money value={capitalCliente}/></b></div>
+                      <div><small>Cuotas</small><b>{cuotasPagadas}/{cuotasTotales}</b></div>
                     </div>
                     {pendiente > 0
                       ? <div className="pn-client-debt"><Money value={pendiente}/> pendiente</div>

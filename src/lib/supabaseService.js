@@ -201,12 +201,10 @@ export async function cargarCarteraCompleta(userId) {
         capital: Number(q.capital) * balanceRatio,
         interest: Number(q.interes) * balanceRatio,
         due: q.fecha_vencimiento,
-        status:
-          q.estado === 'parcial'
-            ? 'Parcial'
-            : overdue
-              ? 'Vencido'
-              : 'Pendiente',
+        status: overdue ? 'Vencido' : q.estado === 'parcial' ? 'Parcial' : 'Pendiente',
+        partiallyPaid: q.estado === 'parcial',
+        paidAmount: Number(q.monto_pagado ?? 0),
+        originalAmount: Number(q.monto),
         n: q.numero,
         totalQuotas: loan?.cantidad_cuotas ?? 0,
         origen: loan?.origen ?? 'efectivo',
@@ -220,6 +218,8 @@ export async function cargarCarteraCompleta(userId) {
     const receipt = m.pago_id ? receiptMap.get(m.pago_id) : null
     const receiptLoanRaw = receipt?.cuota?.prestamo
     const receiptLoan = Array.isArray(receiptLoanRaw) ? receiptLoanRaw[0] : receiptLoanRaw
+    const receiptQuotaRaw = receipt?.cuota
+    const receiptQuota = (Array.isArray(receiptQuotaRaw) ? receiptQuotaRaw[0] : receiptQuotaRaw)?.numero
     const receiptClientRaw = receiptLoan?.cliente
     const receiptClient = Array.isArray(receiptClientRaw) ? receiptClientRaw[0] : receiptClientRaw
     const sale = m.venta_id ? saleMap.get(m.venta_id) : null
@@ -228,7 +228,7 @@ export async function cargarCarteraCompleta(userId) {
     const person = loanClient?.nombre_completo ?? receiptClient?.nombre_completo ?? saleClient?.nombre_completo
     const typeLabel = m.tipo === 'entrada' ? 'Cobro' : m.tipo === 'salida' ? 'Desembolso' : 'Ajuste'
     const label = person
-      ? `${m.venta_id ? 'Venta' : typeLabel} · ${person}${reference ? ` · ${reference}` : ''}`
+      ? `${m.venta_id ? 'Venta' : typeLabel} · ${person}${reference ? ` · ${reference}` : ''}${m.pago_id && receiptQuota ? ` · Cuota ${receiptQuota}` : ''}`
       : m.concepto
     return {
     id: m.id,
@@ -263,6 +263,7 @@ export async function cargarCarteraCompleta(userId) {
     return [{
       id: p.referencia,
       dbId: p.id,
+      cuotaId: p.cuota_id,
       loanId: loan?.referencia ?? '',
       client: client?.nombre_completo ?? 'Cliente',
       phone: client?.telefono ?? '',
@@ -374,6 +375,55 @@ export async function registrarPago(payment, amount, method = 'efectivo') {
     loanId: payment.loanId,
     n: payment.n,
   }
+}
+
+/** Guarda un compromiso de pago para una cuota y conserva sus reprogramaciones. */
+export async function crearPromesaPago(payment, { fecha, nota = '' }) {
+  const { data, error } = await supabase
+    .from('promesas_pago')
+    .insert({ cuota_id:payment.id, fecha_promesa:fecha, nota:nota.trim() || null })
+    .select('id, cuota_id, fecha_promesa, nota, estado, created_at')
+    .single()
+  if (error) throw new Error(error.message)
+  return {
+    id:data.id,
+    cuotaId:data.cuota_id,
+    loanId:payment.loanId,
+    client:payment.client,
+    n:payment.n,
+    fecha:data.fecha_promesa,
+    nota:data.nota || '',
+    estado:data.estado,
+    creada:data.created_at,
+  }
+}
+
+/** Carga promesas propias con sus datos de vencimiento desde Supabase. */
+export async function cargarPromesasPago(userId) {
+  const { data, error } = await queryAllPages(() => supabase
+    .from('promesas_pago')
+    .select('id, cuota_id, fecha_promesa, nota, estado, created_at, cuota:cuotas(numero, prestamo:prestamos(referencia, cliente:clientes(nombre_completo)))')
+    .eq('owner_id', userId)
+    .order('fecha_promesa').order('created_at', { ascending:false }))
+  if (error) throw new Error(error.message)
+  return data.map(p => {
+    const cuota = Array.isArray(p.cuota) ? p.cuota[0] : p.cuota
+    const prestamoRaw = cuota?.prestamo
+    const prestamo = Array.isArray(prestamoRaw) ? prestamoRaw[0] : prestamoRaw
+    const clienteRaw = prestamo?.cliente
+    const cliente = Array.isArray(clienteRaw) ? clienteRaw[0] : clienteRaw
+    return {
+      id:p.id,
+      cuotaId:p.cuota_id,
+      loanId:prestamo?.referencia || '',
+      client:cliente?.nombre_completo || '',
+      n:cuota?.numero,
+      fecha:p.fecha_promesa,
+      nota:p.nota || '',
+      estado:p.estado,
+      creada:p.created_at,
+    }
+  })
 }
 
 /* ─────────────────────────────────────────────
@@ -955,7 +1005,10 @@ export async function cargarCuotasUnificadas(userId) {
       capital:      Number(q.capital) * ratio,
       interest:     Number(q.interes) * ratio,
       due:          q.fecha_vencimiento,
-      status:       q.estado === 'parcial' ? 'Parcial' : overdue ? 'Vencido' : 'Pendiente',
+      status:       overdue ? 'Vencido' : q.estado === 'parcial' ? 'Parcial' : 'Pendiente',
+      partiallyPaid: q.estado === 'parcial',
+      paidAmount: Number(q.monto_pagado ?? 0),
+      originalAmount: Number(q.monto),
       n:            q.numero,
       totalQuotas:  prestamo.cantidad_cuotas ?? 0,
       // Campos específicos del módulo de ventas
