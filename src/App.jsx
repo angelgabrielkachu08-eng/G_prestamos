@@ -1158,7 +1158,6 @@ export default function App() {
   const reminderCount = paymentReminders.today.length + paymentReminders.inTwoDays.length
   const reminderDate = localDateKey(new Date(reminderClock))
   const reminderReadKey = `pn-reminders-read-${user?.id || 'guest'}-${reminderDate}`
-  const reminderDismissKey = `pn-reminders-dismissed-${user?.id || 'guest'}-${reminderDate}`
   const reminderEntries = useMemo(() => [
     ...paymentReminders.today.map(payment => ({ payment, kind:'today', key:`today-${payment.id}` })),
     ...paymentReminders.inTwoDays.map(payment => ({ payment, kind:'soon', key:`soon-${payment.id}` })),
@@ -1170,11 +1169,12 @@ export default function App() {
     ? readReminderState.keys
     : readReminderStorage(reminderReadKey)
   const [dismissedReminderState, setDismissedReminderState] = useState(() => ({
-    key: reminderDismissKey, keys: readReminderStorage(reminderDismissKey),
+    date: reminderDate, keys: [],
   }))
-  const dismissedReminderKeys = dismissedReminderState.key === reminderDismissKey
-    ? dismissedReminderState.keys
-    : readReminderStorage(reminderDismissKey)
+  const dismissedReminderKeys = useMemo(() =>
+    dismissedReminderState.date === reminderDate ? dismissedReminderState.keys : [],
+    [dismissedReminderState, reminderDate]
+  )
   const visibleReminderEntries = reminderEntries.filter(item => !dismissedReminderKeys.includes(item.key))
   const unreadReminderCount = visibleReminderEntries.filter(item => !readReminderKeys.includes(item.key)).length
   const markRemindersRead = useCallback(() => {
@@ -1184,12 +1184,8 @@ export default function App() {
   }, [visibleReminderEntries, reminderReadKey])
   const dismissReminder = useCallback((key) => {
     const keys = [...new Set([...dismissedReminderKeys, key])]
-    setDismissedReminderState({ key:reminderDismissKey, keys })
-    try { localStorage.setItem(reminderDismissKey, JSON.stringify(keys)) } catch { /* El aviso se quita de esta vista aunque falle el almacenamiento. */ }
-    const readKeys = [...new Set([...readReminderKeys, key])]
-    setReadReminderState({ key:reminderReadKey, keys:readKeys })
-    try { localStorage.setItem(reminderReadKey, JSON.stringify(readKeys)) } catch { /* El distintivo se actualiza igual en esta sesión. */ }
-  }, [dismissedReminderKeys, reminderDismissKey, readReminderKeys, reminderReadKey])
+    setDismissedReminderState({ date:reminderDate, keys })
+  }, [dismissedReminderKeys, reminderDate])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -3718,8 +3714,6 @@ function NotificationsModal({ entries = [], permission, onEnable, onDismiss, onC
         <div className="pn-notifications-list">
           {entries.length ? entries.map(({payment,kind,key}) => (
             <article className={`pn-notification-item ${kind === 'today' ? 'is-today' : 'is-soon'}`} key={key}>
-              <button type="button" className="pn-notification-dismiss" onClick={() => onDismiss?.(key)}
-                aria-label={`Quitar aviso de ${payment.client}`} title="Quitar aviso"><X size={14}/></button>
               <span className="pn-notification-icon">{kind === 'today' ? <Bell size={15}/> : <Calendar size={15}/>}</span>
               <div className="pn-notification-copy">
                 <b>{kind === 'today' ? 'Cuota para cobrar hoy' : 'Cuota próxima a vencer'}</b>
@@ -3727,6 +3721,8 @@ function NotificationsModal({ entries = [], permission, onEnable, onDismiss, onC
                 <small>{kind === 'today' ? 'Vence hoy' : 'Vence en 2 días'} · {payment.due ? new Date(`${payment.due}T12:00:00`).toLocaleDateString('es-AR',{day:'numeric',month:'short'}) : 'Fecha no disponible'}</small>
               </div>
               <strong>{fmt(payment.amount)}</strong>
+              <button type="button" className="pn-notification-dismiss" onClick={() => onDismiss?.(key)}
+                aria-label={`Quitar aviso de ${payment.client}`} title="Quitar aviso"><X size={14}/></button>
             </article>
           )) : <div className="pn-notifications-empty"><span><CheckCheck size={23}/></span><b>Estás al día</b><p>No hay cuotas que venzan hoy ni dentro de dos días.</p></div>}
         </div>
