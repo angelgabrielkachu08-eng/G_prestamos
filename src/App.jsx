@@ -1158,6 +1158,7 @@ export default function App() {
   const reminderCount = paymentReminders.today.length + paymentReminders.inTwoDays.length
   const reminderDate = localDateKey(new Date(reminderClock))
   const reminderReadKey = `pn-reminders-read-${user?.id || 'guest'}-${reminderDate}`
+  const reminderDismissKey = `pn-reminders-dismissed-${user?.id || 'guest'}-${reminderDate}`
   const reminderEntries = useMemo(() => [
     ...paymentReminders.today.map(payment => ({ payment, kind:'today', key:`today-${payment.id}` })),
     ...paymentReminders.inTwoDays.map(payment => ({ payment, kind:'soon', key:`soon-${payment.id}` })),
@@ -1168,12 +1169,27 @@ export default function App() {
   const readReminderKeys = readReminderState.key === reminderReadKey
     ? readReminderState.keys
     : readReminderStorage(reminderReadKey)
-  const unreadReminderCount = reminderEntries.filter(item => !readReminderKeys.includes(item.key)).length
+  const [dismissedReminderState, setDismissedReminderState] = useState(() => ({
+    key: reminderDismissKey, keys: readReminderStorage(reminderDismissKey),
+  }))
+  const dismissedReminderKeys = dismissedReminderState.key === reminderDismissKey
+    ? dismissedReminderState.keys
+    : readReminderStorage(reminderDismissKey)
+  const visibleReminderEntries = reminderEntries.filter(item => !dismissedReminderKeys.includes(item.key))
+  const unreadReminderCount = visibleReminderEntries.filter(item => !readReminderKeys.includes(item.key)).length
   const markRemindersRead = useCallback(() => {
-    const keys = reminderEntries.map(item => item.key)
+    const keys = visibleReminderEntries.map(item => item.key)
     setReadReminderState({ key:reminderReadKey, keys })
     try { localStorage.setItem(reminderReadKey, JSON.stringify(keys)) } catch { /* El modal sigue funcionando sin persistencia local. */ }
-  }, [reminderEntries, reminderReadKey])
+  }, [visibleReminderEntries, reminderReadKey])
+  const dismissReminder = useCallback((key) => {
+    const keys = [...new Set([...dismissedReminderKeys, key])]
+    setDismissedReminderState({ key:reminderDismissKey, keys })
+    try { localStorage.setItem(reminderDismissKey, JSON.stringify(keys)) } catch { /* El aviso se quita de esta vista aunque falle el almacenamiento. */ }
+    const readKeys = [...new Set([...readReminderKeys, key])]
+    setReadReminderState({ key:reminderReadKey, keys:readKeys })
+    try { localStorage.setItem(reminderReadKey, JSON.stringify(readKeys)) } catch { /* El distintivo se actualiza igual en esta sesión. */ }
+  }, [dismissedReminderKeys, reminderDismissKey, readReminderKeys, reminderReadKey])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1936,8 +1952,8 @@ export default function App() {
 
       {/* Modales */}
       <AnimatePresence>
-        {notificationsOpen && <NotificationsModal entries={reminderEntries} permission={notificationPermission}
-          onEnable={enableNotifications} onClose={() => setNotificationsOpen(false)}
+        {notificationsOpen && <NotificationsModal entries={visibleReminderEntries} permission={notificationPermission}
+          onEnable={enableNotifications} onDismiss={dismissReminder} onClose={() => setNotificationsOpen(false)}
           onGoToRoute={() => { setNotificationsOpen(false); setModo('prestamos'); setTab('p_ruta'); try { localStorage.setItem('pn-modo','prestamos') } catch { /* La navegación sigue funcionando. */ } }}/>}
       </AnimatePresence>
       <AnimatePresence>
@@ -3684,7 +3700,7 @@ function PaymentPromiseModal({ payment, onClose, onConfirm }) {
   )
 }
 
-function NotificationsModal({ entries = [], permission, onEnable, onClose, onGoToRoute }) {
+function NotificationsModal({ entries = [], permission, onEnable, onDismiss, onClose, onGoToRoute }) {
   useEffect(() => {
     const onKeyDown = event => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKeyDown)
@@ -3702,6 +3718,8 @@ function NotificationsModal({ entries = [], permission, onEnable, onClose, onGoT
         <div className="pn-notifications-list">
           {entries.length ? entries.map(({payment,kind,key}) => (
             <article className={`pn-notification-item ${kind === 'today' ? 'is-today' : 'is-soon'}`} key={key}>
+              <button type="button" className="pn-notification-dismiss" onClick={() => onDismiss?.(key)}
+                aria-label={`Quitar aviso de ${payment.client}`} title="Quitar aviso"><X size={14}/></button>
               <span className="pn-notification-icon">{kind === 'today' ? <Bell size={15}/> : <Calendar size={15}/>}</span>
               <div className="pn-notification-copy">
                 <b>{kind === 'today' ? 'Cuota para cobrar hoy' : 'Cuota próxima a vencer'}</b>
