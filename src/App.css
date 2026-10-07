@@ -5468,6 +5468,58 @@ tbody tr:hover { background: rgba(179,71,255,.06) }
 .pn-prod-cat,.nv-prod-cat { max-width:calc(100% - 70px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .pn-prod-name,.pn-prod-desc,.nv-prod-name,.nv-prod-desc { min-width:0;overflow-wrap:anywhere; }
 .pn-product-modal { width:min(560px,94vw);border-color:rgba(179,71,255,.3);box-shadow:0 30px 90px rgba(0,0,0,.7),0 0 38px rgba(179,71,255,.12); }
+.pn-product-modal .modal-header { min-height:70px;gap:13px;padding:18px 24px;font-size:17px;font-weight:800; }
+.pn-product-modal .modal-body { padding:24px; }
+.pn-product-modal .form-grid { gap:19px 16px; }
+.pn-product-modal .field > span { margin-bottom:8px;font-size:11px; }
+.pn-product-modal .field input,.pn-product-modal .field select { min-height:48px;padding:12px 14px;font-size:14px;border-radius:12px; }
+.pn-product-modal .field select { color-scheme:dark; }
+.pn-product-modal .modal-footer { gap:12px;padding:17px 24px; }
+.pn-product-modal .modal-footer button { min-height:44px;padding-inline:20px; }
+.pn-product-stock-help { display:flex;align-items:flex-start;gap:8px;margin-top:13px;padding:11px 13px;border:1px solid rgba(179,71,255,.14);border-radius:11px;background:rgba(179,71,255,.045);color:#a7a3b2;font-size:11px;line-height:1.5; }
+.pn-product-stock-help svg { flex:none;margin-top:1px;color:#c785ff; }
+.nv-qty button:disabled,.nv-add-btn:disabled { opacity:.42;cursor:not-allowed;filter:saturate(.55); }
+.nv-qty button:disabled:hover { transform:none; }
+.connection-banner { border-color:rgba(255,183,3,.3);background:rgba(255,183,3,.07);color:#ffd986; }
+.connection-banner svg { color:#ffc247;flex:none; }
+.login-offline-banner { position:absolute;z-index:5;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(680px,calc(100% - 28px));display:flex;align-items:center;justify-content:center;gap:9px;padding:11px 15px;border:1px solid rgba(255,183,3,.28);border-radius:12px;background:rgba(33,27,15,.92);color:#ffdc94;font-size:12px;line-height:1.45;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.25); }
+.login-offline-banner svg { flex:none;color:#ffc247; }
+@media(max-width:640px) {
+  .pn-product-modal { width:min(100%,520px);max-height:min(92dvh,780px);border-radius:20px; }
+  .pn-product-modal .modal-header { min-height:62px;padding:15px 18px;font-size:16px; }
+  .pn-product-modal .modal-body { padding:19px 18px; }
+  .pn-product-modal .form-grid { gap:15px 12px; }
+  .pn-product-modal .field input,.pn-product-modal .field select { min-height:50px;font-size:15px; }
+  .pn-product-modal .modal-footer { padding:14px 18px; }
+  .pn-product-modal .modal-footer button { min-height:46px; }
+  .pn-product-stock-help { margin-top:12px;padding:10px 12px;font-size:11px; }
+  .login-offline-banner { top:max(8px,env(safe-area-inset-top));width:calc(100% - 16px);padding:9px 11px;font-size:11px; }
+}
+@media(max-width:420px) {
+  .pn-product-modal .form-grid { grid-template-columns:1fr; }
+}
+
+/* Campos monetarios: espacio estable para el símbolo en pantallas estrechas. */
+@media(max-width:640px) {
+  .lm-input-wrap { min-width:0;width:100%; }
+  .lm-input-prefix { padding-left:36px!important;text-align:left; }
+  .lm-prefix { left:13px;font-size:14px; }
+  .lm-input-suffix { padding-right:34px!important; }
+  .lm-suffix { right:13px; }
+}
+
+/* Los paneles legales mantienen encabezado y cierre accesibles al móvil. */
+@media(max-width:640px) {
+  .legal-overlay { align-items:flex-end;padding:8px 8px max(8px,env(safe-area-inset-bottom)); }
+  .legal-dialog { width:100%;max-height:calc(100dvh - max(16px,env(safe-area-inset-top)));border-radius:20px 20px 14px 14px; }
+  .legal-dialog-head { padding:17px 17px 13px;gap:10px; }
+  .legal-dialog-head h2 { font-size:20px; }
+  .legal-tabs { gap:6px;padding:10px 14px;overflow-x:auto; }
+  .legal-tabs button { flex:none;padding:8px 10px;font-size:11px; }
+  .legal-content { padding:16px 17px max(20px,env(safe-area-inset-bottom)); }
+  .legal-content section { margin-bottom:16px; }
+  .legal-content p { font-size:12px;line-height:1.6;overflow-wrap:anywhere; }
+}
 @media(max-width:640px) { .pn-prod-grid { grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr)); } }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -5820,6 +5872,7 @@ html[data-performance-mode="on"] .pn-performance-on .performance-mode-toggle { t
 .legal-tabs button { padding:8px 13px;border:1px solid rgba(255,255,255,.1);border-radius:9px;background:rgba(255,255,255,.025);color:#a2a6b3;font:inherit;font-size:12px;font-weight:700;cursor:pointer; }
 .legal-tabs .legal-tab-active { border-color:rgba(0,255,135,.4);background:rgba(0,255,135,.09);color:#00f39a;box-shadow:0 0 18px rgba(0,255,135,.08); }
 .legal-content { padding:20px 25px 24px;overflow:auto;overscroll-behavior:contain;color:#d7d4df; }
+.legal-content { min-height:0; }
 .legal-content section { margin:0 0 19px; }
 .legal-content h3 { margin:0 0 6px;color:#c796ff;font-size:14px; }
 .legal-content p { margin:0;color:#b3b4c0;font-size:13px;line-height:1.7; }

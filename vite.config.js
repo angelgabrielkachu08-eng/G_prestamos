@@ -24,6 +24,6 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({ registerType: 'autoUpdate', includeAssets: ['favicon.svg'], manifest: { name: 'Prestaneo Finance OS', short_name: 'Prestaneo', description: 'Gestión inteligente de préstamos y cobranzas', theme_color: '#08090c', background_color: '#08090c', display: 'standalone', orientation: 'portrait-primary', start_url: '/', icons: [{ src: '/pwa-192.svg', sizes: '192x192', type: 'image/svg+xml' }, { src: '/pwa-512.svg', sizes: '512x512', type: 'image/svg+xml' }] } }),
+    VitePWA({ registerType: 'autoUpdate', includeAssets: ['favicon.svg'], manifest: { name: 'Prestaneo Finance OS', short_name: 'Prestaneo', description: 'Gestión inteligente de préstamos y cobranzas', theme_color: '#08090c', background_color: '#08090c', display: 'standalone', orientation: 'portrait-primary', start_url: '/', icons: [{ src: '/pwa-192.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any' }, { src: '/pwa-512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' }] } }),
   ],
 })

@@ -42,6 +42,23 @@ function sanitizePhone(phone) {
   return String(phone || '').replace(/[^\d]/g, '')
 }
 
+function BrandMark({ size = 20 }) {
+  return <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <path d="M16 2.5 28 9.4v13.2L16 29.5 4 22.6V9.4L16 2.5Z" stroke="currentColor" strokeWidth="1.7" opacity=".72"/>
+    <path d="M11 23V9h7a4.5 4.5 0 0 1 0 9h-3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="m16 22 5 2.5 4-2" stroke="#c785ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <circle cx="22.5" cy="10" r="2" fill="#c785ff"/>
+  </svg>
+}
+
+function friendlyConnectionError(message) {
+  const value = String(message || '')
+  if (typeof navigator !== 'undefined' && (!navigator.onLine || /failed to fetch|network request failed|load failed|fetch failed|networkerror/i.test(value))) {
+    return 'No hay conexión a Internet. Conectate para acceder a tus datos y volvé a intentar.'
+  }
+  return value
+}
+
 const today = new Date().toISOString().slice(0, 10)
 const todayLabel = new Date().toLocaleDateString('es-AR', {
   weekday: 'long', day: 'numeric', month: 'long',
@@ -1117,6 +1134,7 @@ export default function App() {
   const [toast, setToast]                 = useState(null)
   const [mobileOpen, setMobileOpen]       = useState(false)
   const [dataError, setDataError]         = useState(null)
+  const [isOnline, setIsOnline]           = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine)
   const [legalSection, setLegalSection]   = useState(null)
   const paymentLocks = useRef(new Set())
   const dataLoadVersion = useRef(0)
@@ -1135,8 +1153,18 @@ export default function App() {
     document.documentElement.dataset.performanceMode = performanceMode ? 'on' : 'off'
   }, [performanceMode])
 
+  useEffect(() => {
+    const updateConnection = () => setIsOnline(navigator.onLine)
+    window.addEventListener('online', updateConnection)
+    window.addEventListener('offline', updateConnection)
+    return () => {
+      window.removeEventListener('online', updateConnection)
+      window.removeEventListener('offline', updateConnection)
+    }
+  }, [])
+
   /* ── Toasts ── */
-  const showToast = useCallback((message, kind = 'success') => setToast({ message, kind }), [])
+  const showToast = useCallback((message, kind = 'success') => setToast({ message: friendlyConnectionError(message), kind }), [])
   const dismissToast = useCallback(() => setToast(null), [])
   useEffect(() => { if (!toast) return; const t = setTimeout(dismissToast, 4500); return () => clearTimeout(t) }, [toast, dismissToast])
 
@@ -1172,8 +1200,9 @@ export default function App() {
       setRutaUnificada(rutaUni)
     } catch (err) {
       if (requestVersion !== dataLoadVersion.current) return
-      setDataError(err.message)
-      showToast(err.message, 'error')
+      const message = friendlyConnectionError(err.message)
+      setDataError(message)
+      showToast(message, 'error')
     } finally {
       if (requestVersion === dataLoadVersion.current) setLoading(false)
     }
@@ -1603,12 +1632,12 @@ export default function App() {
   /* ── Auth screens ── */
   if (!authReady) return (
     <div className="auth-loader">
-      <div className="brand-mark"><Sparkles size={22} /></div>
+      <div className="brand-mark"><BrandMark size={24} /></div>
       <Spinner size={28} />
-      <p>Conectando…</p>
+      <p>{isOnline ? 'Conectando…' : 'Sin conexión a Internet. Conectate para acceder a tus datos.'}</p>
     </div>
   )
-  if (isSupabaseConfigured && !user) return <><Login onSignIn={handleSignIn} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
+  if (isSupabaseConfigured && !user) return <><Login onSignIn={handleSignIn} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode} isOnline={isOnline}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
   /* ── Selector de modo (primera pantalla tras login) ── */
   if (!modo) return <><ModeSelector onSelect={elegirModo} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
@@ -1621,7 +1650,7 @@ export default function App() {
       <aside className={`sidebar sidebar-${modo} ${mobileOpen ? 'sidebar-open' : ''}`}>
         {/* Brand con botón cambiar modo */}
         <div className="brand">
-          <div className="brand-mark"><Sparkles size={19} /></div>
+          <div className="brand-mark"><BrandMark size={21} /></div>
           <div>
             <b>presta<span>neo</span></b>
             <small>{modo === 'prestamos' ? '💵 PRÉSTAMOS' : '🛒 VENTAS'}</small>
@@ -1680,7 +1709,7 @@ export default function App() {
         <header className={`topbar topbar-${modo}`}>
           <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Menú"><Menu size={21}/></button>
           <button className="topbar-brand" onClick={() => setTab(modo === 'prestamos' ? 'p_inicio' : 'v_inicio')} aria-label="Inicio">
-            <div className="topbar-brand-mark"><Sparkles size={14}/></div>
+            <div className="topbar-brand-mark"><BrandMark size={18}/></div>
             <span>PrestaNeo</span>
           </button>
           <div className="breadcrumb">
@@ -1703,6 +1732,7 @@ export default function App() {
         </header>
 
         <div className="page-wrap">
+          {!isOnline && <div className="data-error-banner connection-banner"><AlertTriangle size={17}/><span>Sin conexión a Internet. Conectate para acceder y actualizar tus datos.</span></div>}
           {dataError && (
             <div className="data-error-banner">
               <AlertTriangle size={17}/><span>{dataError}</span>
@@ -3257,14 +3287,6 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
               <label className="lm-label">Dirección (opcional)</label>
               <input className="lm-input" value={address} onChange={e => setAddress(e.target.value)} placeholder="—"/>
             </div>
-            <div>
-              <label className="lm-label">Nivel de riesgo</label>
-              <select className="lm-input" value={risk} onChange={e => setRisk(e.target.value)}>
-                <option value="bajo">🟢 Bajo</option>
-                <option value="medio">🟡 Medio</option>
-                <option value="alto">🔴 Alto</option>
-              </select>
-            </div>
           </div>
         </div>
 
@@ -3479,7 +3501,7 @@ function EditClientModal({ client, onClose, onSave }) {
   const [telefono,  setTelefono]  = useState(client?.phone    || '')
   const [dni,       setDni]       = useState(client?.dni      || '')
   const [direccion, setDireccion] = useState(client?.address  || '')
-  const [riesgo,    setRiesgo]    = useState(client?.risk     || 'medio')
+  const [riesgo]                  = useState(client?.risk     || 'medio')
   const [saving,    setSaving]    = useState(false)
   const [err,       setErr]       = useState('')
 
@@ -3509,14 +3531,6 @@ function EditClientModal({ client, onClose, onSave }) {
             <Field label="Teléfono" value={telefono} onChange={e => setTelefono(e.target.value)} type="tel"/>
             <Field label="DNI" value={dni} onChange={e => setDni(e.target.value)}/>
             <Field label="Dirección" value={direccion} onChange={e => setDireccion(e.target.value)}/>
-            <label className="field">
-              <span>Nivel de riesgo</span>
-              <select value={riesgo} onChange={e => setRiesgo(e.target.value)}>
-                <option value="bajo">🟢 Bajo</option>
-                <option value="medio">🟡 Medio</option>
-                <option value="alto">🔴 Alto</option>
-              </select>
-            </label>
           </div>
         </div>
         <div className="modal-footer">
@@ -3665,6 +3679,7 @@ function ProductoModal({ producto, onClose, onSave }) {
     e.preventDefault()
     if (!nombre.trim()) { setErr('El nombre es requerido'); return }
     if (!precio || Number(precio) <= 0) { setErr('Precio inválido'); return }
+    if (stock === '' || !Number.isInteger(Number(stock)) || Number(stock) < 0) { setErr('Ingresá un stock inicial entero igual o mayor a cero.'); return }
     setSaving(true)
     try {
       await onSave({
@@ -3693,7 +3708,7 @@ function ProductoModal({ producto, onClose, onSave }) {
         </div>
         <div className="modal-body">
           <div className="form-grid">
-            <FieldWithError label="Nombre" value={nombre} onChange={e => setNombre(e.target.value)} error={err}/>
+            <Field label="Nombre" value={nombre} onChange={e => setNombre(e.target.value)}/>
             <Field label="Descripción (opcional)" value={desc} onChange={e => setDesc(e.target.value)}/>
             <label className="field">
               <span>Categoría</span>
@@ -3703,8 +3718,10 @@ function ProductoModal({ producto, onClose, onSave }) {
             </label>
             <Field label="Precio de venta ($)" value={precio} onChange={e => setPrecio(e.target.value)} type="number" prefix="$" min="1"/>
             <Field label="Costo ($)" value={costo} onChange={e => setCosto(e.target.value)} type="number" prefix="$" placeholder="Opcional"/>
-            <Field label="Stock" value={stock} onChange={e => setStock(e.target.value)} type="number" placeholder="Opcional" min="0"/>
+            <Field label={editing ? 'Unidades disponibles' : 'Stock inicial'} value={stock} onChange={e => setStock(e.target.value)} type="number" placeholder="Ej.: 10" min="0" step="1" required/>
           </div>
+          <div className="pn-product-stock-help"><Layers size={14}/>{editing ? 'Ingresá el total de unidades que tenés ahora; las ventas descuentan stock automáticamente.' : 'Indicá cuántas unidades tenés listas para vender.'}</div>
+          {err && <p className="pn-field-error pn-field-error-block" role="alert">{err}</p>}
         </div>
         <div className="modal-footer">
           <button type="button" className="secondary-button" onClick={onClose}>Cancelar</button>
@@ -3789,7 +3806,7 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
                   <div className="pn-prod-footer">
                     <div className="pn-prod-price">{fmt(p.precioContado)}</div>
                     <div className={`pn-prod-stock ${p.stock <= 3 ? 'pn-stock-low' : ''}`}>
-                      <Layers size={11}/> {p.stock} en stock
+                      <Layers size={11}/> {p.stock <= 0 ? 'Agotado' : p.stock <= 3 ? `Stock bajo · ${p.stock}` : `${p.stock} unidades`}
                     </div>
                   </div>
                 </motion.div>
@@ -3820,7 +3837,7 @@ function NuevaVenta({ productos = [], onSubmit }) {
   const [phone,    setPhone]   = useState('')
   const [dni,      setDni]     = useState('')
   const [address,  setAddress] = useState('')
-  const [risk,     setRisk]    = useState('medio')
+  const [risk]                 = useState('medio')
   const [anticipo, setAnticipo]= useState('')
   const [tasa,     setTasa]    = useState('20')
   const [cuotas,   setCuotas]  = useState('6')
@@ -3848,20 +3865,33 @@ function NuevaVenta({ productos = [], onSubmit }) {
   )
 
   function addProd(prod) {
-    setCarrito(prev => {
-      const idx = prev.findIndex(i => i.producto.id === prod.id)
-      if (idx >= 0) return prev.map((i, n) => n === idx ? {...i, qty: i.qty + 1} : i)
-      return [...prev, { producto: prod, qty: 1 }]
-    })
+    if (Number(prod.stock) <= 0) { setErr(`${prod.nombre}: no hay unidades disponibles en stock.`); return }
+    const existing = carrito.find(i => i.producto.id === prod.id)
+    if (existing && existing.qty >= Number(prod.stock)) {
+      setErr(`Solo hay ${prod.stock} unidad${Number(prod.stock) === 1 ? '' : 'es'} de ${prod.nombre}.`)
+      return
+    }
+    setErr('')
+    setCarrito(prev => existing
+      ? prev.map(i => i.producto.id === prod.id ? {...i, qty: i.qty + 1} : i)
+      : [...prev, { producto: prod, qty: 1 }])
   }
   function setQty(id, qty) {
-    if (qty <= 0) setCarrito(prev => prev.filter(i => i.producto.id !== id))
-    else setCarrito(prev => prev.map(i => i.producto.id === id ? {...i, qty} : i))
+    if (qty <= 0) { setErr(''); setCarrito(prev => prev.filter(i => i.producto.id !== id)); return }
+    const item = carrito.find(i => i.producto.id === id)
+    if (item && qty > Number(item.producto.stock)) {
+      setErr(`Solo hay ${item.producto.stock} unidad${Number(item.producto.stock) === 1 ? '' : 'es'} de ${item.producto.nombre}.`)
+      return
+    }
+    setErr('')
+    setCarrito(prev => prev.map(i => i.producto.id === id ? {...i, qty} : i))
   }
 
   async function handleSubmit() {
     if (!client.trim()) { setErr('El nombre del cliente es requerido'); return }
     if (carrito.length === 0) { setErr('Agregá al menos un producto al carrito'); return }
+    const sinStock = carrito.find(i => i.qty > Number(i.producto.stock))
+    if (sinStock) { setErr(`Stock insuficiente de ${sinStock.producto.nombre}: disponibles ${sinStock.producto.stock}.`); setStep(1); return }
     if (Number(anticipo) < 0 || Number(anticipo) >= subtotal) { setErr('El anticipo debe ser menor que el total de la compra para financiar el saldo.'); return }
     if (!preview) { setErr('El monto financiado debe ser mayor a cero'); return }
     setSaving(true)
@@ -3950,10 +3980,10 @@ function NuevaVenta({ productos = [], onSubmit }) {
                           ? <div className="nv-qty">
                               <button type="button" onClick={() => setQty(prod.id, inCart.qty - 1)}>−</button>
                               <span>{inCart.qty}</span>
-                              <button type="button" onClick={() => setQty(prod.id, inCart.qty + 1)}>+</button>
+                              <button type="button" disabled={inCart.qty >= Number(prod.stock)} aria-label={inCart.qty >= Number(prod.stock) ? 'Stock máximo alcanzado' : 'Sumar unidad'} onClick={() => setQty(prod.id, inCart.qty + 1)}>+</button>
                             </div>
-                          : <button type="button" className="nv-add-btn" onClick={() => addProd(prod)}>
-                              <Plus size={13}/> Agregar
+                          : <button type="button" className="nv-add-btn" disabled={Number(prod.stock) <= 0} onClick={() => addProd(prod)}>
+                              <Plus size={13}/> {Number(prod.stock) <= 0 ? 'Sin stock' : 'Agregar'}
                             </button>
                         }
                       </motion.div>
@@ -4016,14 +4046,6 @@ function NuevaVenta({ productos = [], onSubmit }) {
                 <div>
                   <label className="lm-label">Dirección (opcional)</label>
                   <input className="lm-input" value={address} onChange={e => setAddress(e.target.value)}/>
-                </div>
-                <div>
-                  <label className="lm-label">Nivel de riesgo</label>
-                  <select className="lm-input" value={risk} onChange={e => setRisk(e.target.value)}>
-                    <option value="bajo">🟢 Bajo</option>
-                    <option value="medio">🟡 Medio</option>
-                    <option value="alto">🔴 Alto</option>
-                  </select>
                 </div>
               </div>
             </div>
@@ -4702,7 +4724,7 @@ function ModeSelector({ onSelect, onOpenLegal, performanceMode, onTogglePerforma
           <motion.div className="ms2-logo-icon"
             animate={{ boxShadow: ['0 0 16px rgba(0,255,135,.4)', '0 0 32px rgba(179,71,255,.5)', '0 0 16px rgba(0,255,135,.4)'] }}
             transition={{ duration: 3, repeat: Infinity }}>
-            <Sparkles size={22}/>
+            <BrandMark size={23}/>
           </motion.div>
           <span className="ms2-logo-name">presta<em>neo</em></span>
         </div>
@@ -4786,14 +4808,14 @@ function ModeSelector({ onSelect, onOpenLegal, performanceMode, onTogglePerforma
 /* ═══════════════════════════════════════════════════════════
    LOGIN — neon (lv2)
 ════════════════════════════════════════════════════════════ */
-function Login({ onSignIn, onOpenLegal, performanceMode, onTogglePerformance }) {
+function Login({ onSignIn, onOpenLegal, performanceMode, onTogglePerformance, isOnline = true }) {
   const [loading, setLoading] = useState(false)
   const [err,     setErr]     = useState('')
 
   async function handleGoogle() {
     setLoading(true)
     setErr('')
-    try { await onSignIn() } catch (ex) { setErr(ex.message); setLoading(false) }
+    try { await onSignIn() } catch (ex) { setErr(friendlyConnectionError(ex.message)); setLoading(false) }
   }
 
   const orbs = [
@@ -4806,6 +4828,7 @@ function Login({ onSignIn, onOpenLegal, performanceMode, onTogglePerformance }) 
   return (
     <MotionConfig reducedMotion={performanceMode ? 'always' : 'never'} skipAnimations={performanceMode} transition={performanceMode ? { skipAnimations: true } : undefined}>
     <div className={`lv2-root ${performanceMode ? 'lv2-reduced pn-performance-on' : ''}`}>
+      {!isOnline && <div className="login-offline-banner" role="status"><AlertTriangle size={15}/> Sin conexión a Internet. Conectate para iniciar sesión y acceder a tus datos.</div>}
       {/* Background orbs */}
       {!performanceMode && orbs.map((o, i) => (
         <motion.div key={i} className={o.cls} style={o.style}
@@ -4825,7 +4848,7 @@ function Login({ onSignIn, onOpenLegal, performanceMode, onTogglePerformance }) 
         {/* Brand */}
         <div className="lv2-brand">
           <div className="lv2-brand-icon">
-            <Sparkles size={20} style={{ color: '#00e676' }}/>
+            <BrandMark size={23}/>
           </div>
           <div className="lv2-brand-text">
             <span className="lv2-brand-name">prestaneo</span>
