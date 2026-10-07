@@ -65,6 +65,12 @@ const localDateKey = (date = new Date()) => {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+const readReminderStorage = (key) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch { return [] }
+}
 const today = localDateKey()
 const todayLabel = new Date().toLocaleDateString('es-AR', {
   weekday: 'long', day: 'numeric', month: 'long',
@@ -1125,6 +1131,7 @@ export default function App() {
   const [notificationPermission, setNotificationPermission] = useState(() =>
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
   )
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [reminderClock, setReminderClock] = useState(() => Date.now())
   const paymentLocks = useRef(new Set())
   const dataLoadVersion = useRef(0)
@@ -1149,6 +1156,24 @@ export default function App() {
     }
   }, [payments, reminderClock])
   const reminderCount = paymentReminders.today.length + paymentReminders.inTwoDays.length
+  const reminderDate = localDateKey(new Date(reminderClock))
+  const reminderReadKey = `pn-reminders-read-${user?.id || 'guest'}-${reminderDate}`
+  const reminderEntries = useMemo(() => [
+    ...paymentReminders.today.map(payment => ({ payment, kind:'today', key:`today-${payment.id}` })),
+    ...paymentReminders.inTwoDays.map(payment => ({ payment, kind:'soon', key:`soon-${payment.id}` })),
+  ], [paymentReminders])
+  const [readReminderState, setReadReminderState] = useState(() => ({
+    key: reminderReadKey, keys: readReminderStorage(reminderReadKey),
+  }))
+  const readReminderKeys = readReminderState.key === reminderReadKey
+    ? readReminderState.keys
+    : readReminderStorage(reminderReadKey)
+  const unreadReminderCount = reminderEntries.filter(item => !readReminderKeys.includes(item.key)).length
+  const markRemindersRead = useCallback(() => {
+    const keys = reminderEntries.map(item => item.key)
+    setReadReminderState({ key:reminderReadKey, keys })
+    try { localStorage.setItem(reminderReadKey, JSON.stringify(keys)) } catch { /* El modal sigue funcionando sin persistencia local. */ }
+  }, [reminderEntries, reminderReadKey])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1158,10 +1183,33 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const count = reminderCount
+    const count = unreadReminderCount
     if (count > 0 && 'setAppBadge' in navigator) navigator.setAppBadge(count).catch(() => {})
     else if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {})
-  }, [reminderCount])
+  }, [unreadReminderCount])
+
+  useEffect(() => {
+    if (!mobileOpen && !notificationsOpen) return
+    const scrollY = window.scrollY
+    const previous = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      left: document.body.style.left,
+      right: document.body.style.right,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+    }
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.left = '0'
+    document.body.style.right = '0'
+    document.body.style.width = '100%'
+    document.body.style.overflow = 'hidden'
+    return () => {
+      Object.assign(document.body.style, previous)
+      window.scrollTo(0, scrollY)
+    }
+  }, [mobileOpen, notificationsOpen])
 
   useEffect(() => {
     if (notificationPermission !== 'granted' || !user) return
@@ -1758,7 +1806,7 @@ export default function App() {
       <aside className={`sidebar sidebar-${modo} ${mobileOpen ? 'sidebar-open' : ''}`}>
         {/* Brand con botón cambiar modo */}
         <div className="brand">
-          <div className="brand-mark brand-mark-with-badge"><BrandMark size={21} />{reminderCount > 0 && <span className="brand-notification-badge" aria-label={`${reminderCount} avisos pendientes`}>{reminderCount > 99 ? '99+' : reminderCount}</span>}</div>
+          <div className="brand-mark brand-mark-with-badge"><BrandMark size={21} />{unreadReminderCount > 0 && <span className="brand-notification-badge" aria-label={`${unreadReminderCount} avisos sin leer`}>{unreadReminderCount > 99 ? '99+' : unreadReminderCount}</span>}</div>
           <div>
             <b>presta<span>neo</span></b>
             <small>{modo === 'prestamos' ? '💵 PRÉSTAMOS' : '🛒 VENTAS'}</small>
@@ -1825,10 +1873,9 @@ export default function App() {
           </div>
           <div className="top-actions">
             {(loading || ventasLoading) && <Spinner size={16} className="top-spinner"/>}
-            <button type="button" className="notification-toggle" onClick={enableNotifications}
-              title={notificationPermission === 'granted' ? 'Avisos del navegador activados' : 'Activar avisos en este dispositivo'}
-              aria-label={notificationPermission === 'granted' ? 'Avisos activados' : 'Activar avisos'}>
-              <Bell size={16}/>{reminderCount > 0 && <span>{reminderCount > 99 ? '99+' : reminderCount}</span>}
+            <button type="button" className="notification-toggle" onClick={() => { setNotificationsOpen(true); markRemindersRead() }}
+              title="Ver notificaciones" aria-label="Ver notificaciones" aria-haspopup="dialog" aria-expanded={notificationsOpen}>
+              <Bell size={16}/>{unreadReminderCount > 0 && <span>{unreadReminderCount > 99 ? '99+' : unreadReminderCount}</span>}
             </button>
             <div className="topbar-caja" title="Cobrado hoy">
               <ArrowDownLeft size={13}/><span>{fmt(totals.cobradoHoy)}</span>
@@ -1888,6 +1935,11 @@ export default function App() {
       </main>
 
       {/* Modales */}
+      <AnimatePresence>
+        {notificationsOpen && <NotificationsModal entries={reminderEntries} permission={notificationPermission}
+          onEnable={enableNotifications} onClose={() => setNotificationsOpen(false)}
+          onGoToRoute={() => { setNotificationsOpen(false); setModo('prestamos'); setTab('p_ruta'); try { localStorage.setItem('pn-modo','prestamos') } catch { /* La navegación sigue funcionando. */ } }}/>}
+      </AnimatePresence>
       <AnimatePresence>
         {(modal === 'loan' || modal?.type === 'loan') && <LoanModal onClose={() => setModal(null)} onCreate={handleCreateLoan} userId={user?.id} prefill={modal?.prefill} />}
       </AnimatePresence>
@@ -3632,6 +3684,47 @@ function PaymentPromiseModal({ payment, onClose, onConfirm }) {
   )
 }
 
+function NotificationsModal({ entries = [], permission, onEnable, onClose, onGoToRoute }) {
+  useEffect(() => {
+    const onKeyDown = event => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+  return createPortal(
+    <motion.div className="pn-notifications-backdrop" role="presentation" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+      <motion.section className="pn-notifications-card" role="dialog" aria-modal="true" aria-labelledby="pn-notifications-title"
+        initial={{opacity:0,y:12,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:8,scale:.98}}>
+        <header className="pn-notifications-head">
+          <div className="pn-notifications-heading-icon"><Bell size={18}/></div>
+          <div><h2 id="pn-notifications-title">Notificaciones</h2><p>Cuotas que necesitan tu atención</p></div>
+          <button type="button" className="pn-btn-icon" onClick={onClose} aria-label="Cerrar notificaciones"><X size={17}/></button>
+        </header>
+        <div className="pn-notifications-list">
+          {entries.length ? entries.map(({payment,kind,key}) => (
+            <article className={`pn-notification-item ${kind === 'today' ? 'is-today' : 'is-soon'}`} key={key}>
+              <span className="pn-notification-icon">{kind === 'today' ? <Bell size={15}/> : <Calendar size={15}/>}</span>
+              <div className="pn-notification-copy">
+                <b>{kind === 'today' ? 'Cuota para cobrar hoy' : 'Cuota próxima a vencer'}</b>
+                <span>{payment.client} · Cuota {payment.n}/{payment.totalQuotas || '—'}</span>
+                <small>{kind === 'today' ? 'Vence hoy' : 'Vence en 2 días'} · {payment.due ? new Date(`${payment.due}T12:00:00`).toLocaleDateString('es-AR',{day:'numeric',month:'short'}) : 'Fecha no disponible'}</small>
+              </div>
+              <strong>{fmt(payment.amount)}</strong>
+            </article>
+          )) : <div className="pn-notifications-empty"><span><CheckCheck size={23}/></span><b>Estás al día</b><p>No hay cuotas que venzan hoy ni dentro de dos días.</p></div>}
+        </div>
+        <footer className="pn-notifications-footer">
+          <button type="button" className="pn-btn-outline pn-btn-sm" onClick={onGoToRoute}><Route size={13}/> Ir a Ruta de Cobro</button>
+          {permission === 'granted'
+            ? <span className="pn-notifications-enabled"><Check size={13}/> Avisos activados</span>
+            : permission === 'unsupported'
+              ? <span className="pn-notifications-hint">Este navegador no ofrece avisos del sistema.</span>
+              : <button type="button" className="pn-notifications-enable" onClick={onEnable}><Bell size={13}/> Activar avisos en este dispositivo</button>}
+        </footer>
+      </motion.section>
+    </motion.div>, document.body
+  )
+}
+
 /* ═══════════════════════════════════════════════════════════════
    EDIT CLIENT MODAL
 ═══════════════════════════════════════════════════════════════ */
@@ -3790,7 +3883,7 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
                           ? <span className="pn-badge-red"><CircleAlert size={9}/> {Math.abs(dias)}d de atraso</span>
                           : esHoy
                             ? <span className="pn-badge-amber"><Clock size={9}/> Hoy</span>
-                            : <span className="pn-badge-dim">Mañana</span>
+                            : <span className="pn-badge-dim">{dias === 1 ? 'Mañana' : `En ${dias} días`}</span>
                         }
                         {(p.partiallyPaid || p.status === 'Parcial') && <span className="pn-badge-purple">Ya abonó parte</span>}
                         {promesa && <span className={`pn-promise-badge ${promesa.fecha < today ? 'is-late' : ''}`}><Calendar size={10}/> Prometió {new Date(`${promesa.fecha}T12:00:00`).toLocaleDateString('es-AR')}</span>}
