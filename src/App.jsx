@@ -23,7 +23,7 @@ import {
   buscarClientesPorNombre, actualizarCliente,
   cargarHistorialPrestamos, cobradoPorMes,
   // Módulo ventas
-  cargarProductos, crearProducto, actualizarProducto, desactivarProducto,
+  cargarProductos, cargarMovimientosStock, registrarMovimientoStock, crearProducto, actualizarProducto, desactivarProducto,
   cargarVentas, crearVentaCredito, cargarCuotasUnificadas,
   // Papelera
   archivarCliente, restaurarCliente, cargarPapelera, cargarFichaCliente, eliminarClientePermanente,
@@ -1123,6 +1123,8 @@ export default function App() {
   const [exportOpen, setExportOpen]       = useState(false) // ExportModal
   // Módulo ventas
   const [productos, setProductos]         = useState([])
+  const [movimientosStock, setMovimientosStock] = useState([])
+  const [stockHistoryError, setStockHistoryError] = useState(null)
   const [ventas, setVentas]               = useState([])
   const [ventasLoading, setVentasLoading] = useState(false)
   const [rutaUnificada, setRutaUnificada] = useState([]) // cuotas efectivo+venta
@@ -1180,13 +1182,14 @@ export default function App() {
     setLoading(true)
     setDataError(null)
     try {
-      const [cartera, historial, bars, prods, vtas, rutaUni] = await Promise.all([
+      const [cartera, historial, bars, prods, vtas, rutaUni, stockResult] = await Promise.all([
         cargarCarteraCompleta(uid),
         cargarHistorialPrestamos(uid),
         cobradoPorMes(uid),
         cargarProductos(uid),
         cargarVentas(uid),
         cargarCuotasUnificadas(uid),
+        cargarMovimientosStock(uid).then(data => ({ data })).catch(error => ({ error })),
       ])
       if (requestVersion !== dataLoadVersion.current) return
       setLoans(cartera.loans)
@@ -1196,6 +1199,8 @@ export default function App() {
       setAllLoans(historial)
       setMonthBars(bars)
       setProductos(prods)
+      setMovimientosStock(stockResult.data ?? [])
+      setStockHistoryError(stockResult.error ? 'Falta aplicar la migración de historial de inventario en Supabase.' : null)
       setVentas(vtas)
       setRutaUnificada(rutaUni)
     } catch (err) {
@@ -1550,23 +1555,36 @@ export default function App() {
 
   const handleCreateProduct = async (form) => {
     if (!user) return
-    try {
-      const row = await crearProducto(user.id, form)
-      setProductos(prev => [...prev, {
-        id: row.id, nombre: row.nombre, descripcion: row.descripcion ?? '',
-        categoria: row.categoria, precioContado: Number(row.precio_contado),
-        costo: Number(row.costo ?? 0), stock: Number(row.stock), imagenUrl: null,
-      }])
-      showToast('Producto agregado al catálogo')
-    } catch (err) { showToast(`Error: ${err.message}`, 'error') }
+    const row = await crearProducto(user.id, form)
+    setProductos(prev => [...prev, {
+      id: row.id, nombre: row.nombre, descripcion: row.descripcion ?? '',
+      categoria: row.categoria, precioContado: Number(row.precio_contado),
+      costo: Number(row.costo ?? 0), stock: Number(row.stock), imagenUrl: null,
+    }])
+    showToast('Producto agregado al catálogo')
   }
 
   const handleUpdateProduct = async (id, form) => {
+    await actualizarProducto(id, form)
+    setProductos(prev => prev.map(p => p.id === id ? { ...p, ...form, stock:p.stock } : p))
+    showToast('Producto actualizado')
+  }
+
+  const handleStockMovement = async (id, movement) => {
     try {
-      await actualizarProducto(id, form)
-      setProductos(prev => prev.map(p => p.id === id ? { ...p, ...form } : p))
-      showToast('Producto actualizado')
-    } catch (err) { showToast(`Error: ${err.message}`, 'error') }
+      const result = await registrarMovimientoStock(id, movement)
+      const producto = productos.find(p => p.id === id)
+      setProductos(prev => prev.map(p => p.id === id ? { ...p, stock:result.stock } : p))
+      setMovimientosStock(prev => [{
+        id: result.id, productoId:id, producto:producto?.nombre ?? 'Producto', tipo:movement.tipo,
+        cantidad:Number(movement.cantidad), stockAnterior:producto?.stock ?? 0,
+        stockResultante:result.stock, motivo:movement.motivo || (movement.tipo === 'entrada' ? 'Reposición de inventario' : 'Salida manual'), fecha:new Date().toISOString(),
+      }, ...prev])
+      showToast(movement.tipo === 'entrada' ? `Stock actualizado: ${result.stock} unidades disponibles` : `Salida registrada: quedan ${result.stock} unidades`)
+    } catch (err) {
+      showToast(`No se pudo actualizar el stock: ${err.message}`, 'error')
+      throw err
+    }
   }
 
   const handleDeleteProduct = async (id) => {
@@ -1592,10 +1610,15 @@ export default function App() {
 
     if (esVentas) {
       // ── Reporte de VENTAS ──
-      const ventasF  = alcance === 'cliente'
-        ? ventas.filter(v => v.client === clienteFiltro)
-        : ventas
-      const ledgerF  = ledgerVentas.filter(m => !m.voided && enRango(m.rawDate))
+      const ventasF = ventas.filter(v =>
+        (alcance !== 'cliente' || v.client === clienteFiltro) &&
+        enRango(v.fechaVenta || v.createdAt)
+      )
+      const referencias = new Set(ventasF.map(v => v.prestamo?.referencia).filter(Boolean))
+      const ledgerF = ledgerVentas.filter(m => !m.voided && enRango(m.rawDate) &&
+        (alcance !== 'cliente' || [...referencias].some(ref => String(m.label || '').includes(ref))))
+      const loansF = allLoans.filter(l => referencias.has(l.id))
+      const paymentsF = payments.filter(p => p.origen === 'venta' && referencias.has(p.loanId))
       const titulo   = alcance === 'cliente' ? `Cliente: ${clienteFiltro}` : desde || hasta ? `Del ${desde ?? '—'} al ${hasta ?? '—'}` : 'Reporte de Ventas'
       try {
         if (formato === 'excel') {
@@ -1604,7 +1627,7 @@ export default function App() {
           showToast('Excel de ventas descargado')
         } else {
           const { exportReportDocxVentas } = await import('./utils/reportDocx')
-          await exportReportDocxVentas({ ventas: ventasF, ledger: ledgerF, titulo })
+          await exportReportDocxVentas({ ventas: ventasF, ledger: ledgerF, loans: loansF, payments: paymentsF, titulo })
           showToast('Word de ventas descargado')
         }
       } catch (err) { showToast(`Error al generar reporte: ${err.message}`, 'error') }
@@ -1627,7 +1650,7 @@ export default function App() {
         }
       } catch (err) { showToast(`Error al generar reporte: ${err.message}`, 'error') }
     }
-  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receiptsEfectivo, showToast])
+  }, [modo, loansEfectivo, paymentsEfectivo, ledgerEfectivo, ledgerVentas, ventas, receiptsEfectivo, allLoans, payments, showToast])
 
   /* ── Auth screens ── */
   if (!authReady) return (
@@ -1751,10 +1774,10 @@ export default function App() {
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} />}
 
               {/* ── MÓDULO VENTAS ── */}
-              {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} totals={totalsVentas} loading={loading} go={setTab} />}
-              {tab === 'v_catalogo' && <Catalogo productos={productos} loading={loading} onCreate={handleCreateProduct} onUpdate={handleUpdateProduct} onDelete={handleDeleteProduct} />}
+              {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} productos={productos} totals={totalsVentas} loading={loading} go={setTab} />}
+      {tab === 'v_catalogo' && <Catalogo productos={productos} movimientosStock={movimientosStock} stockHistoryError={stockHistoryError} loading={loading} onCreate={handleCreateProduct} onUpdate={handleUpdateProduct} onDelete={handleDeleteProduct} onStockMovement={handleStockMovement} />}
               {tab === 'v_nueva'    && <NuevaVenta productos={productos} onSubmit={handleCreateVenta} />}
-              {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} />}
+              {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} onReport={() => setExportOpen(true)} />}
               {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onArchive={handleArchivarCliente} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
               {tab === 'v_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
@@ -3679,7 +3702,7 @@ function ProductoModal({ producto, onClose, onSave }) {
     e.preventDefault()
     if (!nombre.trim()) { setErr('El nombre es requerido'); return }
     if (!precio || Number(precio) <= 0) { setErr('Precio inválido'); return }
-    if (stock === '' || !Number.isInteger(Number(stock)) || Number(stock) < 0) { setErr('Ingresá un stock inicial entero igual o mayor a cero.'); return }
+    if (!editing && (stock === '' || !Number.isInteger(Number(stock)) || Number(stock) < 0)) { setErr('Ingresá un stock inicial entero igual o mayor a cero.'); return }
     setSaving(true)
     try {
       await onSave({
@@ -3718,9 +3741,9 @@ function ProductoModal({ producto, onClose, onSave }) {
             </label>
             <Field label="Precio de venta ($)" value={precio} onChange={e => setPrecio(e.target.value)} type="number" prefix="$" min="1"/>
             <Field label="Costo ($)" value={costo} onChange={e => setCosto(e.target.value)} type="number" prefix="$" placeholder="Opcional"/>
-            <Field label={editing ? 'Unidades disponibles' : 'Stock inicial'} value={stock} onChange={e => setStock(e.target.value)} type="number" placeholder="Ej.: 10" min="0" step="1" required/>
+            {!editing && <Field label="Stock inicial" value={stock} onChange={e => setStock(e.target.value)} type="number" placeholder="Ej.: 10" min="0" step="1" required/>}
           </div>
-          <div className="pn-product-stock-help"><Layers size={14}/>{editing ? 'Ingresá el total de unidades que tenés ahora; las ventas descuentan stock automáticamente.' : 'Indicá cuántas unidades tenés listas para vender.'}</div>
+          <div className="pn-product-stock-help"><Layers size={14}/>{editing ? `Stock actual: ${producto?.stock ?? 0} unidades. Usá “Registrar movimiento” para reponer o retirar stock con motivo.` : 'Indicá cuántas unidades tenés listas para vender. Cada venta descontará las unidades automáticamente.'}</div>
           {err && <p className="pn-field-error pn-field-error-block" role="alert">{err}</p>}
         </div>
         <div className="modal-footer">
@@ -3738,9 +3761,10 @@ function ProductoModal({ producto, onClose, onSave }) {
 /* ═══════════════════════════════════════════════════════════════
    CATALOGO
 ═══════════════════════════════════════════════════════════════ */
-function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelete }) {
+function Catalogo({ productos = [], movimientosStock = [], stockHistoryError, loading = false, onCreate, onUpdate, onDelete, onStockMovement }) {
   const [q,       setQ]      = useState('')
   const [modal,   setModal]  = useState(null)
+  const [stockTarget, setStockTarget] = useState(null)
   const [catFil,  setCatFil] = useState('Todas')
 
   const cats = useMemo(() => ['Todas', ...new Set(productos.map(p => p.categoria))].sort(), [productos])
@@ -3748,12 +3772,12 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
   const filtered = useMemo(() =>
     productos.filter(p =>
       (catFil === 'Todas' || p.categoria === catFil) &&
-      (!q.trim() || p.nombre.toLowerCase().includes(q.toLowerCase()))
+      (!q.trim() || `${p.nombre} ${p.descripcion} ${p.categoria}`.toLowerCase().includes(q.toLowerCase()))
     ), [productos, q, catFil]
   )
 
   async function handleSave(data) {
-    if (data.id) await onUpdate(data.id, { nombre:data.nombre, descripcion:data.descripcion, categoria:data.categoria, precioContado:data.precio_contado??data.precioContado, costo:data.costo, stock:data.stock })
+    if (data.id) await onUpdate(data.id, { nombre:data.nombre, descripcion:data.descripcion, categoria:data.categoria, precioContado:data.precio_contado??data.precioContado, costo:data.costo })
     else await onCreate({ nombre:data.nombre, descripcion:data.descripcion, categoria:data.categoria, precioContado:data.precio_contado??data.precioContado, costo:data.costo, stock:data.stock })
     setModal(null)
   }
@@ -3769,6 +3793,18 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
         <motion.button className="pn-hero-btn pn-hero-btn-purple" onClick={() => setModal('new')} whileHover={{ scale:1.03 }} whileTap={{ scale:.97 }}>
           <PackagePlus size={15}/> Agregar producto
         </motion.button>
+        <button className="pn-btn-outline pn-btn-purple" disabled={!productos.length || Boolean(stockHistoryError)} onClick={() => setStockTarget({ productoId:productos[0]?.id })}>
+          <Layers size={15}/> Registrar movimiento
+        </button>
+      </div>
+
+      {stockHistoryError && <div className="pn-field-error pn-field-error-block" role="status">{stockHistoryError} Para habilitar reposiciones y el historial automático, aplicá `supabase/migrations/20261006000000_prestaneo_stock_movements.sql` en Supabase.</div>}
+
+      <div className="pn-stock-overview">
+        <div><small>Productos</small><b>{productos.length}</b></div>
+        <div><small>Stock crítico</small><b className={productos.some(p => Number(p.stock) <= 3) ? 'pn-stock-low' : 'text-green'}>{productos.filter(p => Number(p.stock) > 0 && Number(p.stock) <= 3).length}</b></div>
+        <div><small>Agotados</small><b className={productos.some(p => Number(p.stock) <= 0) ? 'pn-stock-low' : 'text-green'}>{productos.filter(p => Number(p.stock) <= 0).length}</b></div>
+        <div><small>Valor potencial del stock</small><b>{fmt(productos.reduce((sum,p) => sum + Number(p.precioContado || 0) * Number(p.stock || 0), 0))}</b></div>
       </div>
 
       <div className="pn-toolbar">
@@ -3797,6 +3833,7 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
                   <div className="pn-prod-header">
                     <span className="pn-prod-cat">{p.categoria}</span>
                     <div className="pn-prod-actions">
+                      <button className="pn-btn-icon pn-stock-add-icon" disabled={Boolean(stockHistoryError)} title="Registrar entrada o salida de stock" aria-label={`Registrar movimiento de stock de ${p.nombre}`} onClick={() => setStockTarget(p)}><PackagePlus size={14}/></button>
                       <button className="pn-btn-icon" onClick={() => setModal(p)}><Edit3 size={13}/></button>
                       <button className="pn-btn-icon pn-btn-danger-icon" onClick={() => onDelete(p.id)}><Trash2 size={13}/></button>
                     </div>
@@ -3804,7 +3841,7 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
                   <h3 className="pn-prod-name">{p.nombre}</h3>
                   {p.descripcion && <p className="pn-prod-desc">{p.descripcion}</p>}
                   <div className="pn-prod-footer">
-                    <div className="pn-prod-price">{fmt(p.precioContado)}</div>
+                    <div><div className="pn-prod-price">{fmt(p.precioContado)}</div>{Number(p.costo) > 0 && <small className="pn-prod-margin">Margen bruto estimado: {fmt(Number(p.precioContado) - Number(p.costo))} · {Math.round((Number(p.precioContado) - Number(p.costo)) / Number(p.precioContado) * 100)}%</small>}</div>
                     <div className={`pn-prod-stock ${p.stock <= 3 ? 'pn-stock-low' : ''}`}>
                       <Layers size={11}/> {p.stock <= 0 ? 'Agotado' : p.stock <= 3 ? `Stock bajo · ${p.stock}` : `${p.stock} unidades`}
                     </div>
@@ -3813,6 +3850,19 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
               ))}
             </div>
       }
+
+      <section className="pn-panel pn-stock-history">
+        <div className="pn-panel-header"><span className="pn-panel-title"><Activity size={14}/> Movimientos recientes de inventario</span><span className="pn-count">{movimientosStock.length} registrados</span></div>
+        {movimientosStock.length === 0
+          ? <p className="pn-stock-empty">Todavía no hay reposiciones ni salidas manuales registradas. Las ventas nuevas aparecerán aquí automáticamente.</p>
+          : <div className="pn-stock-movement-list">{movimientosStock.slice(0,8).map(m => <div className="pn-stock-movement" key={m.id}>
+              <span className={`pn-stock-movement-icon ${m.tipo}`}><Layers size={14}/></span>
+              <span className="pn-stock-movement-main"><b>{m.producto}</b><small>{m.motivo}{m.venta ? ` · ${m.venta}` : ''}</small></span>
+              <span className={`pn-stock-movement-qty ${m.tipo === 'entrada' ? 'text-green' : m.tipo === 'venta' ? 'text-purple' : 'pn-stock-low'}`}>{m.tipo === 'entrada' ? '+' : '−'}{m.cantidad}</span>
+              <span className="pn-stock-movement-balance">{m.stockAnterior} → {m.stockResultante}</span>
+              <time>{new Date(m.fecha).toLocaleDateString('es-AR',{day:'2-digit',month:'short'})}</time>
+            </div>)}</div>}
+      </section>
 
       <AnimatePresence>
         {modal && (
@@ -3823,8 +3873,45 @@ function Catalogo({ productos = [], loading = false, onCreate, onUpdate, onDelet
           />
         )}
       </AnimatePresence>
+      <AnimatePresence>{stockTarget && <StockMovementModal productos={productos} initialProductId={stockTarget.productoId || stockTarget.id} onClose={() => setStockTarget(null)} onSave={onStockMovement}/>}</AnimatePresence>
     </div>
   )
+}
+
+function StockMovementModal({ productos = [], initialProductId, onClose, onSave }) {
+  const [productoId, setProductoId] = useState(initialProductId || productos[0]?.id || '')
+  const [tipo, setTipo] = useState('entrada')
+  const [cantidad, setCantidad] = useState('1')
+  const [motivo, setMotivo] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const producto = productos.find(p => p.id === productoId)
+  async function submit(e) {
+    e.preventDefault()
+    const qty = Number(cantidad)
+    if (!productoId || !Number.isInteger(qty) || qty <= 0) { setError('Elegí un producto e ingresá una cantidad entera mayor a cero.'); return }
+    if (tipo === 'salida' && qty > Number(producto?.stock || 0)) { setError(`Solo hay ${producto?.stock ?? 0} unidades disponibles.`); return }
+    setSaving(true)
+    try { await onSave(productoId, { tipo, cantidad:qty, motivo:motivo.trim() }); onClose() }
+    catch (ex) { setError(friendlyConnectionError(ex.message)) }
+    finally { setSaving(false) }
+  }
+  return createPortal(<motion.div className="modal-backdrop" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <motion.form className="loan-modal pn-stock-modal" onSubmit={submit} initial={{y:22,opacity:0}} animate={{y:0,opacity:1}} exit={{y:16,opacity:0}}>
+      <div className="modal-header"><PackagePlus size={19}/><span>Registrar movimiento de stock</span><button type="button" className="icon-button" onClick={onClose} style={{marginLeft:'auto'}} aria-label="Cerrar"><X size={16}/></button></div>
+      <div className="modal-body"><div className="pn-stock-current" aria-live="polite"><span>Disponible ahora</span><b>{producto?.stock ?? 0} unidades</b></div>
+        <div className="form-grid">
+          <label className="field"><span>Producto</span><select value={productoId} onChange={e=>setProductoId(e.target.value)} required>{productos.map(p=><option key={p.id} value={p.id}>{p.nombre} · {p.stock} disponibles</option>)}</select></label>
+          <label className="field"><span>Tipo de movimiento</span><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="entrada">Ingreso / reposición</option><option value="salida">Salida / ajuste</option></select></label>
+          <Field label="Cantidad de unidades" value={cantidad} onChange={e=>setCantidad(e.target.value)} type="number" min="1" step="1" required/>
+          <Field label="Motivo (opcional)" value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder={tipo==='entrada'?'Compra a proveedor':'Merma, devolución, ajuste…'}/>
+        </div>
+        {tipo === 'salida' && <p className="pn-stock-result">Quedarán {Math.max(0,Number(producto?.stock || 0)-Number(cantidad || 0))} unidades disponibles.</p>}
+        {error && <p className="pn-field-error pn-field-error-block" role="alert">{error}</p>}
+      </div>
+      <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving || !productos.length}>{saving?<Spinner size={14}/>:<Check size={14}/>} Confirmar movimiento</button></div>
+    </motion.form>
+  </motion.div>,document.body)
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -4049,12 +4136,13 @@ function NuevaVenta({ productos = [], onSubmit }) {
                 </div>
               </div>
             </div>
+            {err && <p className="pn-field-error pn-field-error-block" role="alert">{err}</p>}
             <div className="nv-step-nav">
               <button type="button" className="pn-btn-secondary" onClick={() => setStep(1)}>
                 <ChevronLeft size={14}/> Atrás
               </button>
               <motion.button type="button" className="pn-btn-primary pn-btn-purple"
-                onClick={() => { setErr(''); setStep(3) }}
+                onClick={() => { if (!client.trim()) { setErr('Ingresá el nombre del cliente para continuar.'); return } setErr(''); setStep(3) }}
                 whileHover={{ scale:1.02 }} whileTap={{ scale:.97 }}>
                 Siguiente <ArrowRight size={14}/>
               </motion.button>
@@ -4295,36 +4383,47 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
 /* ═══════════════════════════════════════════════════════════════
    VENTAS CLIENTES — lista de ventas agrupada por cliente
 ═══════════════════════════════════════════════════════════════ */
-function VentasClientes({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onExportSale }) {
+function estadoVenta(venta, payments, loans) {
+  if (venta.estado === 'cancelado') return 'Cancelado'
+  const loan = loans.find(l => l.id === venta.prestamo?.referencia)
+  const total = Number(loan?.installments ?? venta.prestamo?.cuotas ?? 0)
+  const paid = Number(loan?.paid ?? 0)
+  if (venta.estado === 'pagado' || (total > 0 && paid >= total) || Number(venta.montoFinanciado) <= 0) return 'Pagado'
+  if (payments.some(p => p.loanId === venta.prestamo?.referencia && p.status === 'Vencido')) return 'En mora'
+  return 'Activo'
+}
+
+function VentasClientes({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onExportSale, onReport }) {
   const [q,      setQ]      = useState('')
   const [filtro, setFiltro] = useState('Todos')
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
 
   const cuotasVenta = useMemo(() => payments.filter(p => p.origen === 'venta'), [payments])
 
   const clientes = useMemo(() => {
     const map = new Map()
-    for (const v of ventas) {
+    const visibles = ventas.filter(v => {
+      const term = q.trim().toLowerCase()
+      const matchesText = !term || [v.client, v.phone, v.referencia, ...(v.items ?? []).map(item => item.nombre)].some(value => String(value || '').toLowerCase().includes(term))
+      const date = String(v.fechaVenta || '').slice(0,10)
+      const matchesDate = (!desde || date >= desde) && (!hasta || date <= hasta)
+      const matchesState = filtro === 'Todos' || estadoVenta(v, cuotasVenta, loans) === filtro
+      return matchesText && matchesDate && matchesState
+    })
+    for (const v of visibles) {
       if (!map.has(v.clienteId)) map.set(v.clienteId, { clienteId:v.clienteId, client:v.client, phone:v.phone, ventas:[] })
       map.get(v.clienteId).ventas.push(v)
     }
     return [...map.values()]
-      .filter(c => (!q.trim() || c.client.toLowerCase().includes(q.toLowerCase())) &&
-        (filtro === 'Todos' || c.ventas.some(v => {
-          const cuotasC = cuotasVenta.filter(p => p.loanId === v.prestamo?.referencia)
-          const vencidas = cuotasC.filter(p => p.status === 'Vencido').length
-          const loan = loans.find(l => l.id === v.prestamo?.referencia)
-          const totalCuotas = Number(loan?.installments ?? v.prestamo?.cuotas ?? 0)
-          const est = (totalCuotas > 0 && Number(loan?.paid || 0) >= totalCuotas) || v.estado === 'pagado' ? 'Pagado' : vencidas > 0 ? 'En mora' : 'Activo'
-          return est === filtro
-        })))
       .sort((a,b) => a.client.localeCompare(b.client))
-  }, [ventas, loans, q, filtro, cuotasVenta])
+  }, [ventas, loans, q, filtro, desde, hasta, cuotasVenta])
 
   const kpis = useMemo(() => ({
     total:   ventas.reduce((s,v) => s+Number(v.montoTotal),    0),
     cobrado: ventas.reduce((s,v) => s + Number(v.anticipo || 0) + Number(loans.find(l => l.id === v.prestamo?.referencia)?.totalRecuperado || 0), 0),
-    pend:    cuotasVenta.filter(p=>p.status!=='Pagado'&&Number(p.amount)>0).reduce((s,p)=>s+Number(p.amount),0),
-    clientes:new Set(ventas.map(v=>v.clienteId)).size,
+    pend:    cuotasVenta.reduce((s,p)=>s+Number(p.amount || 0),0),
+    vencido: cuotasVenta.filter(p=>p.status==='Vencido').reduce((s,p)=>s+Number(p.amount || 0),0),
   }), [ventas, cuotasVenta, loans])
 
   return (
@@ -4338,6 +4437,7 @@ function VentasClientes({ ventas = [], payments = [], loans = [], loading = fals
         <motion.button className="pn-hero-btn pn-hero-btn-purple" onClick={()=>go('v_nueva')} whileHover={{ scale:1.03 }} whileTap={{ scale:.97 }}>
           <ShoppingCart size={15}/> Nueva venta
         </motion.button>
+        <button className="pn-btn-outline pn-btn-purple" onClick={onReport}><FileSpreadsheet size={15}/> Reportes</button>
       </div>
 
       {/* KPIs */}
@@ -4345,25 +4445,27 @@ function VentasClientes({ ventas = [], payments = [], loans = [], loading = fals
         {[
           { label:'Total vendido',    value:kpis.total,    icon:ShoppingCart, color:'purple' },
           { label:'Total cobrado',    value:kpis.cobrado,  icon:Check,        color:'green'  },
-          { label:'Saldo por cobrar', value:kpis.pend,     icon:Clock,        color:'amber'  },
-          { label:'Clientes',         value:kpis.clientes, icon:Users,        color:'teal', isMoney:false },
+          { label:'Saldo pendiente', value:kpis.pend,     icon:Clock,        color:'amber'  },
+          { label:'Cuotas vencidas', value:kpis.vencido,  icon:CircleAlert,  color:'red' },
         ].map((k,i) => (
           <motion.div key={k.label} className={`pn-kpi pn-kpi-${k.color}`}
             initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*.07 }}>
             <div className="pn-kpi-top"><span className="pn-kpi-label">{k.label}</span><k.icon size={15} className="pn-kpi-icon"/></div>
-            {loading ? <div className="pn-kpi-sk"/> : <div className="pn-kpi-val">{k.isMoney===false ? k.value : fmt(k.value)}</div>}
+            {loading ? <div className="pn-kpi-sk"/> : <div className="pn-kpi-val">{fmt(k.value)}</div>}
           </motion.div>
         ))}
       </div>
 
       <div className="pn-toolbar">
-        <label className="pn-searchbox"><Search size={14}/><input placeholder="Buscar cliente…" value={q} onChange={e=>setQ(e.target.value)}/></label>
+        <label className="pn-searchbox"><Search size={14}/><input placeholder="Buscar cliente, producto o referencia…" value={q} onChange={e=>setQ(e.target.value)}/></label>
         <div className="pn-filter-pills">
-          {['Todos','Activo','En mora','Pagado'].map(f=>(
+          {['Todos','Activo','En mora','Pagado','Cancelado'].map(f=>(
             <button key={f} className={`pn-pill ${filtro===f?'pn-pill-active-purple':''}`} onClick={()=>setFiltro(f)}>{f}</button>
           ))}
         </div>
-        <span className="pn-count">{clientes.length} clientes</span>
+        <label className="pn-date-filter"><span>Desde</span><input type="date" value={desde} max={hasta || undefined} onChange={e=>setDesde(e.target.value)}/></label>
+        <label className="pn-date-filter"><span>Hasta</span><input type="date" value={hasta} min={desde || undefined} onChange={e=>setHasta(e.target.value)}/></label>
+        <span className="pn-count">{clientes.length} clientes · {clientes.reduce((n,c)=>n+c.ventas.length,0)} ventas</span>
       </div>
 
       {loading ? (
@@ -5467,11 +5569,12 @@ function PrestamosInicio({ totals = {}, loans = [], payments = [], monthBars = [
   )
 }
 
-function VentasInicio({ ventas = [], payments = [], loans = [], totals = {}, loading = false, go }) {
+function VentasInicio({ ventas = [], payments = [], loans = [], productos = [], totals = {}, loading = false, go }) {
   const totalVendido  = ventas.reduce((s,v) => s+Number(v.montoTotal),      0)
   const cuotasVenta = payments.filter(p => p.origen === 'venta')
   const saldoPorCobrar = cuotasVenta.reduce((s,p) => s + Number(p.amount || 0), 0)
   const totalCobrado = ventas.reduce((s,v) => s + Number(v.anticipo || 0) + Number(loans.find(l => l.id === v.prestamo?.referencia)?.totalRecuperado || 0), 0)
+  const productosCriticos = productos.filter(p => Number(p.stock) <= 3)
 
   const kpis = [
     { label:'Total vendido', value:totalVendido, icon:ShoppingCart, color:'purple' },
@@ -5517,6 +5620,14 @@ function VentasInicio({ ventas = [], payments = [], loans = [], totals = {}, loa
           </motion.button>
         ))}
       </div>
+      {productosCriticos.length > 0 && (
+        <motion.button type="button" className="pn-inventory-alert" onClick={() => go('v_catalogo')}
+          initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ delay:.28 }}>
+          <span className="pn-inventory-alert-icon"><CircleAlert size={18}/></span>
+          <span className="pn-inventory-alert-copy"><b>{productosCriticos.length} producto{productosCriticos.length === 1 ? '' : 's'} con stock bajo</b><small>{productosCriticos.slice(0,3).map(p => `${p.nombre} (${p.stock})`).join(' · ')}{productosCriticos.length > 3 ? ' · y más' : ''}</small></span>
+          <span className="pn-inventory-alert-action">Revisar catálogo <ArrowRight size={13}/></span>
+        </motion.button>
+      )}
       {ventas.length > 0 && (
         <motion.section className="pn-panel" initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ delay:.35 }}>
           <div className="pn-panel-header">

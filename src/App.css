@@ -6318,3 +6318,58 @@ html[data-performance-mode="on"] .lv2-root::after { display:none!important; }
 @media(hover:none) and (max-width:640px) {
   .pn-client-card:hover,.pn-prod-card:hover,.pn-panel:hover { box-shadow:none; }
 }
+
+/* Ventas: inventario, filtros y alertas legibles */
+.pn-stock-overview { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0; }
+.pn-stock-overview > div { min-width:0;display:flex;flex-direction:column;gap:7px;padding:16px 18px;border:1px solid rgba(196,133,248,.16);border-radius:16px;background:linear-gradient(135deg,rgba(143,67,194,.1),rgba(17,20,26,.82)); }
+.pn-stock-overview small { color:var(--pn-muted);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase; }
+.pn-stock-overview b { color:var(--pn-text);font-size:21px;line-height:1.25; }
+.pn-stock-overview .pn-stock-low { color:var(--pn-red)!important; }
+.pn-stock-history { margin-top:18px;overflow:hidden; }
+.pn-stock-empty { margin:0;padding:22px;color:var(--pn-muted);font-size:13px; }
+.pn-stock-movement-list { display:flex;flex-direction:column; }
+.pn-stock-movement { display:grid;grid-template-columns:34px minmax(140px,1fr) auto auto auto;align-items:center;gap:13px;padding:13px 17px;border-top:1px solid rgba(255,255,255,.055); }
+.pn-stock-movement-icon { width:32px;height:32px;display:grid;place-items:center;border-radius:10px;background:rgba(143,67,194,.12);color:var(--pn-purpleL); }
+.pn-stock-movement-icon.entrada { color:var(--pn-green);background:rgba(34,197,94,.1); }
+.pn-stock-movement-main { min-width:0;display:flex;flex-direction:column;gap:4px; }
+.pn-stock-movement-main b { overflow:hidden;color:var(--pn-text);font-size:12px;text-overflow:ellipsis;white-space:nowrap; }
+.pn-stock-movement-main small,.pn-stock-movement time { overflow:hidden;color:var(--pn-muted);font-size:10px;text-overflow:ellipsis;white-space:nowrap; }
+.pn-stock-movement-qty { font-size:13px;font-weight:800; }
+.pn-stock-movement-balance { color:var(--pn-muted);font-size:11px;font-variant-numeric:tabular-nums; }
+.pn-stock-modal { width:min(620px,calc(100vw - 32px)); }
+.pn-stock-current { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding:14px 16px;border:1px solid rgba(34,197,94,.2);border-radius:13px;background:rgba(34,197,94,.06);color:var(--pn-muted);font-size:12px; }
+.pn-stock-current b { color:var(--pn-green);font-size:16px; }
+.pn-stock-result { padding:10px 12px;border-radius:10px;background:rgba(245,158,11,.08);color:var(--pn-amber);font-size:12px; }
+.pn-date-filter { display:flex;align-items:center;gap:8px;min-height:42px;padding:5px 10px;border:1px solid var(--pn-border);border-radius:11px;background:rgba(255,255,255,.025); }
+.pn-date-filter span { color:var(--pn-muted);font-size:10px;font-weight:700;text-transform:uppercase; }
+.pn-date-filter input { min-width:128px;border:0;outline:0;background:transparent;color:var(--pn-text);font:inherit;font-size:11px;color-scheme:dark; }
+.pn-inventory-alert { width:100%;display:flex;align-items:center;gap:13px;margin:14px 0 20px;padding:15px 17px;border:1px solid rgba(245,158,11,.24);border-radius:15px;background:linear-gradient(110deg,rgba(245,158,11,.09),rgba(143,67,194,.07));text-align:left;cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .2s; }
+.pn-inventory-alert:hover { transform:translateY(-2px);border-color:rgba(245,158,11,.5);box-shadow:0 10px 28px rgba(245,158,11,.08); }
+.pn-inventory-alert-icon { width:38px;height:38px;flex:0 0 auto;display:grid;place-items:center;border-radius:12px;background:rgba(245,158,11,.12);color:var(--pn-amber); }
+.pn-inventory-alert-copy { min-width:0;display:flex;flex:1;flex-direction:column;gap:4px; }
+.pn-inventory-alert-copy b { color:var(--pn-text);font-size:13px; }
+.pn-inventory-alert-copy small { overflow:hidden;color:var(--pn-muted);font-size:11px;text-overflow:ellipsis;white-space:nowrap; }
+.pn-inventory-alert-action { display:flex;align-items:center;gap:6px;color:var(--pn-amber);font-size:11px;font-weight:700;white-space:nowrap; }
+@media(max-width:900px) {
+  .pn-stock-overview { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .pn-stock-movement { grid-template-columns:32px minmax(0,1fr) auto auto; }
+  .pn-stock-movement time { display:none; }
+}
+@media(max-width:640px) {
+  .pn-stock-overview { gap:8px;margin:12px 0; }
+  .pn-stock-overview > div { gap:5px;padding:12px;border-radius:13px; }
+  .pn-stock-overview small { font-size:9px; }
+  .pn-stock-overview b { font-size:17px; }
+  .pn-stock-movement { grid-template-columns:30px minmax(0,1fr) auto;gap:9px;padding:11px 12px; }
+  .pn-stock-movement-balance { display:none; }
+  .pn-stock-movement-main b { font-size:11px; }
+  .pn-stock-movement-main small { max-width:52vw; }
+  .pn-date-filter { flex:1 1 calc(50% - 6px);justify-content:space-between;min-width:0; }
+  .pn-date-filter input { min-width:0;width:112px; }
+  .pn-inventory-alert { align-items:flex-start;gap:10px;padding:12px; }
+  .pn-inventory-alert-icon { width:34px;height:34px; }
+  .pn-inventory-alert-copy b { font-size:12px; }
+  .pn-inventory-alert-copy small { max-width:58vw;font-size:10px; }
+  .pn-inventory-alert-action { align-self:center;font-size:0; }
+  .pn-inventory-alert-action svg { width:17px;height:17px; }
+}

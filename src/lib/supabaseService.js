@@ -708,11 +708,44 @@ export async function actualizarProducto(productoId, data) {
       categoria:      data.categoria,
       precio_contado: data.precioContado,
       costo:          data.costo,
-      stock:          data.stock,
     })
     .eq('id', productoId)
 
   if (error) throw new Error(error.message)
+}
+
+/** Historial ordenado de reposiciones, salidas y ventas que movieron stock. */
+export async function cargarMovimientosStock(userId) {
+  const { data, error } = await queryAllPages(() => supabase
+    .from('movimientos_stock')
+    .select('id, producto_id, tipo, cantidad, stock_anterior, stock_resultante, motivo, created_at, producto:productos(nombre), venta:ventas(referencia)')
+    .eq('owner_id', userId)
+    .order('created_at', { ascending: false }).order('id'))
+  if (error) throw new Error(error.message)
+  return data.map(m => ({
+    id: m.id,
+    productoId: m.producto_id,
+    producto: m.producto?.nombre ?? 'Producto eliminado',
+    venta: m.venta?.referencia ?? null,
+    tipo: m.tipo,
+    cantidad: Number(m.cantidad),
+    stockAnterior: Number(m.stock_anterior),
+    stockResultante: Number(m.stock_resultante),
+    motivo: m.motivo,
+    fecha: m.created_at,
+  }))
+}
+
+/** Actualiza el inventario y registra el movimiento atómicamente en Supabase. */
+export async function registrarMovimientoStock(productoId, { tipo, cantidad, motivo }) {
+  const { data, error } = await supabase.rpc('registrar_movimiento_stock', {
+    p_producto_id: productoId,
+    p_tipo: tipo,
+    p_cantidad: Number(cantidad),
+    p_motivo: motivo || null,
+  })
+  if (error) throw new Error(error.message)
+  return { id: data.id, stock: Number(data.stock) }
 }
 
 /** Elimina (desactiva) un producto */
