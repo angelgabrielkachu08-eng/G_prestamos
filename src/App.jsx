@@ -636,7 +636,7 @@ const HELP_CONTENT = {
     color: 'purple',
     sections: [
       { heading: '¿Cómo funciona?', text: 'Elegís uno o más productos del catálogo, registrás al cliente, el anticipo que entregó y configurás el financiamiento del resto en cuotas.' },
-      { heading: '¿Qué es el monto financiado?', text: 'Total del artículo menos el anticipo. Eso es lo que se divide en cuotas con el interés que vos definas.' },
+      { heading: '¿Cómo definís las cuotas?', text: 'El total de contado menos el anticipo es el saldo financiado. Indicá cuántas cuotas querés y cuánto va a valer cada una; PrestaNeo calcula el total y arma el cronograma.' },
       { heading: '¿Puedo vender sin financiamiento?', text: 'Sí. Si el anticipo es igual al precio total, el monto financiado queda en $0 y no se generan cuotas. Solo se registra la venta.' },
     ],
   },
@@ -4188,7 +4188,7 @@ function NuevaVenta({ productos = [], onSubmit }) {
   const [address,  setAddress] = useState('')
   const [risk]                 = useState('medio')
   const [anticipo, setAnticipo]= useState('')
-  const [tasa,     setTasa]    = useState('20')
+  const [valorCuota, setValorCuota] = useState('')
   const [cuotas,   setCuotas]  = useState('6')
   const [freq,     setFreq]    = useState('semanal')
   const [firstDue, setFirstDue]= useState(today)
@@ -4200,10 +4200,38 @@ function NuevaVenta({ productos = [], onSubmit }) {
   const subtotal   = useMemo(() => carrito.reduce((s,i) => s + i.producto.precioContado * i.qty, 0), [carrito])
   const anticipoInvalido = anticipo !== '' && (Number(anticipo) < 0 || Number(anticipo) >= subtotal)
   const financiado = Math.max(0, subtotal - (Number(anticipo) || 0))
-  const preview    = useMemo(() =>
-    financiado > 0 ? calcularPrestamoDirecto(financiado, tasa, Number(cuotas), freq, firstDue, false) : null,
-    [financiado, tasa, cuotas, freq, firstDue]
-  )
+  const cantidadCuotas = Number(cuotas)
+  const montoCuota = Math.round((Number(valorCuota) || 0) * 100) / 100
+  const totalEnCuotas = montoCuota * cantidadCuotas
+  const cuotasInsuficientes = montoCuota > 0 && Number.isInteger(cantidadCuotas) && cantidadCuotas > 0 &&
+    Math.round(totalEnCuotas * 100) < Math.round(financiado * 100)
+  const preview = useMemo(() => {
+    if (financiado <= 0 || montoCuota <= 0 || !Number.isInteger(cantidadCuotas) || cantidadCuotas <= 0) return null
+    const totalCuotasCentavos = Math.round(totalEnCuotas * 100)
+    const financiadoCentavos = Math.round(financiado * 100)
+    if (totalCuotasCentavos < financiadoCentavos) return null
+
+    const totalPagable = totalCuotasCentavos / 100
+    const totalInteres = Math.round((totalPagable - financiado) * 100) / 100
+    const tasaDerivada = financiado > 0 ? totalInteres / financiado * 100 : 0
+    const dates = calcularPrestamoDirecto(financiado, tasaDerivada, cantidadCuotas, freq, firstDue, false)
+    if (!dates) return null
+
+    const capitalRegular = Math.round((financiado / cantidadCuotas) * 100) / 100
+    const interesRegular = Math.round((totalInteres / cantidadCuotas) * 100) / 100
+    const cronograma = dates.cronograma.map((quota, index) => {
+      const last = index === cantidadCuotas - 1
+      const capital = last
+        ? Math.round((financiado - capitalRegular * (cantidadCuotas - 1)) * 100) / 100
+        : capitalRegular
+      const interes = last
+        ? Math.round((totalInteres - interesRegular * (cantidadCuotas - 1)) * 100) / 100
+        : interesRegular
+      return { ...quota, monto_cuota:montoCuota, capital_cuota:capital, interes_cuota:interes }
+    })
+
+    return { ...dates, total_interes:totalInteres, total_a_pagar:totalPagable, monto_cuota:montoCuota, cronograma }
+  }, [financiado, montoCuota, cantidadCuotas, totalEnCuotas, freq, firstDue])
 
   const cats = useMemo(() => ['Todas', ...new Set(productos.map(p => p.categoria))].sort(), [productos])
   const filteredProds = useMemo(() =>
@@ -4242,14 +4270,20 @@ function NuevaVenta({ productos = [], onSubmit }) {
     const sinStock = carrito.find(i => i.qty > Number(i.producto.stock))
     if (sinStock) { setErr(`Stock insuficiente de ${sinStock.producto.nombre}: disponibles ${sinStock.producto.stock}.`); setStep(1); return }
     if (Number(anticipo) < 0 || Number(anticipo) >= subtotal) { setErr('El anticipo debe ser menor que el total de la compra para financiar el saldo.'); return }
-    if (!preview) { setErr('El monto financiado debe ser mayor a cero'); return }
+    if (financiado <= 0) { setErr('El saldo a financiar debe ser mayor a cero.'); return }
+    if (!Number.isInteger(cantidadCuotas) || cantidadCuotas <= 0) { setErr('Ingresá una cantidad válida de cuotas.'); return }
+    if (!(montoCuota > 0)) { setErr('Ingresá cuánto va a valer cada cuota.'); return }
+    if (cuotasInsuficientes) { setErr(`El total de las cuotas debe cubrir el saldo financiado (${fmt(financiado)}).`); return }
+    if (!preview) { setErr('Revisá el valor de las cuotas y la fecha de vencimiento.'); return }
     setSaving(true)
     try {
       await onSubmit({
         client: client.trim(), phone, dni, address, risk,
         items: carrito.map(i => ({ productoId: i.producto.id, nombre: i.producto.nombre, cantidad: i.qty, precioUnitario: i.producto.precioContado })),
         montoTotal: subtotal, anticipo: Number(anticipo) || 0, fechaVenta: today, notas: '',
-        rate: Number(tasa), installments: Number(cuotas), frequency: freq, firstDue, omitSunday: false,
+        // Compatibilidad con el esquema actual: tasa_interes se deriva del total acordado.
+        rate: financiado > 0 ? preview.total_interes / financiado * 100 : 0,
+        installments: cantidadCuotas, frequency: freq, firstDue, omitSunday: false,
         schedule: preview.cronograma,
       })
     } catch (ex) { setErr(ex.message) }
@@ -4450,15 +4484,16 @@ function NuevaVenta({ productos = [], onSubmit }) {
                   {anticipoInvalido && <small className="nv-field-warning">El anticipo debe ser mayor o igual a $0 y menor que el total de la compra ({fmt(subtotal)}).</small>}
                 </div>
                 <div>
-                  <label className="lm-label">Tasa de interés total</label>
+                  <label className="lm-label">Valor de cada cuota</label>
                   <div className="lm-input-wrap">
-                    <input className="lm-input lm-input-suffix" value={tasa} onChange={e => setTasa(e.target.value)} type="number" min="0" step="0.5"/>
-                    <span className="lm-suffix">%</span>
+                    <span className="lm-prefix">$</span>
+                    <input className="lm-input lm-input-prefix" value={valorCuota} onChange={e => setValorCuota(e.target.value)} type="number" min="0" step="0.01" placeholder="Ej. 130000"/>
                   </div>
+                  {cuotasInsuficientes && <small className="nv-field-warning">El total de las cuotas debe cubrir al menos {fmt(financiado)}.</small>}
                 </div>
                 <div>
                   <label className="lm-label">Número de cuotas</label>
-                  <input className="lm-input" value={cuotas} onChange={e => setCuotas(e.target.value)} type="number" min="1"/>
+                  <input className="lm-input" value={cuotas} onChange={e => setCuotas(e.target.value)} type="number" min="1" step="1"/>
                 </div>
                 <div>
                   <label className="lm-label">Frecuencia</label>
@@ -4483,10 +4518,10 @@ function NuevaVenta({ productos = [], onSubmit }) {
                   initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }} exit={{ opacity:0 }}>
                   <div className="lm-preview-header"><Sparkles size={14}/><span>Resumen del crédito</span></div>
                   <div className="lm-preview-kpis">
-                    <div className="lm-pkpi"><span>Financiado</span><b className="text-purple">{fmt(financiado)}</b></div>
-                    <div className="lm-pkpi"><span>Cuota</span><b>{fmt(preview.monto_cuota)}</b></div>
-                    <div className="lm-pkpi"><span>Interés</span><b className="text-amber">{fmt(preview.total_interes)}</b></div>
-                    <div className="lm-pkpi"><span>Total a pagar</span><b className="text-green">{fmt(preview.total_a_pagar)}</b></div>
+                    <div className="lm-pkpi"><span>Saldo financiado</span><b className="text-purple">{fmt(financiado)}</b></div>
+                    <div className="lm-pkpi"><span>Valor de cada cuota</span><b>{fmt(preview.monto_cuota)}</b></div>
+                    <div className="lm-pkpi"><span>Total en cuotas</span><b className="text-green">{fmt(preview.total_a_pagar)}</b></div>
+                    <div className="lm-pkpi"><span>Total con anticipo</span><b>{fmt((Number(anticipo) || 0) + preview.total_a_pagar)}</b></div>
                   </div>
                 </motion.div>
               )}

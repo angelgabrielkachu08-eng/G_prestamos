@@ -881,9 +881,18 @@ export async function crearVentaCredito(userId, form) {
   const refPrestamo = `CV-${String(Date.now()).slice(-7)}`
 
   const montoFinanciado = Number(form.montoTotal) - Number(form.anticipo ?? 0)
+  const totalCuotas = form.schedule.length > 0
+    ? Number(form.schedule.reduce((total, cuota) => total + Number(cuota.monto_cuota || 0), 0).toFixed(2))
+    : Number((montoFinanciado * (1 + Number(form.rate || 0) / 100)).toFixed(2))
+  if (totalCuotas + 0.009 < montoFinanciado) {
+    throw new Error('El total de las cuotas debe cubrir el saldo financiado.')
+  }
+  const totalInteres = Number((totalCuotas - montoFinanciado).toFixed(2))
+  // La base conserva tasa_interes por compatibilidad; se calcula desde el plan acordado.
+  const tasaInterna = montoFinanciado > 0 ? totalInteres / montoFinanciado * 100 : 0
   const montoCuota = form.schedule.length > 0
     ? Number(form.schedule[0].monto_cuota.toFixed(2))
-    : Number((montoFinanciado * (1 + form.rate / 100) / form.installments).toFixed(2))
+    : Number((totalCuotas / form.installments).toFixed(2))
 
   const p_cliente = {
     nombre_completo: form.client,
@@ -907,9 +916,9 @@ export async function crearVentaCredito(userId, form) {
   const p_prestamo = {
     referencia:       refPrestamo,
     capital:          montoFinanciado,
-    tasa_interes:     form.rate,
-    total_interes:    Number((montoFinanciado * form.rate / 100).toFixed(2)),
-    total_a_pagar:    Number((montoFinanciado * (1 + form.rate / 100)).toFixed(2)),
+    tasa_interes:     tasaInterna,
+    total_interes:    totalInteres,
+    total_a_pagar:    totalCuotas,
     monto_cuota:      montoCuota,
     cantidad_cuotas:  form.installments,
     frecuencia:       form.frequency,
