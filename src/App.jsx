@@ -65,6 +65,24 @@ const localDateKey = (date = new Date()) => {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+function addPeriodToDateKey(dateKey, period) {
+  const [year, month, day] = String(dateKey).split('-').map(Number)
+  const date = new Date(year, month - 1, day, 12)
+  if (period === 'diario') date.setDate(date.getDate() + 1)
+  else if (period === 'quincenal') date.setDate(date.getDate() + 15)
+  else {
+    date.setDate(1)
+    date.setMonth(date.getMonth() + 1)
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+    date.setDate(Math.min(day, lastDay))
+  }
+  return localDateKey(date)
+}
+function daysBetweenDateKeys(start, end) {
+  const from = new Date(`${start}T12:00:00`)
+  const to = new Date(`${end}T12:00:00`)
+  return Math.round((to.getTime() - from.getTime()) / 86400000)
+}
 const readReminderStorage = (key) => {
   try {
     const value = JSON.parse(localStorage.getItem(key) || '[]')
@@ -1479,7 +1497,7 @@ export default function App() {
     if (!user) { showToast('Debes iniciar sesión', 'error'); return }
     try {
       const { dbResult, reference } = await crearPrestamo(user.id, form)
-      const newLoan = { id: reference, dbId: dbResult.prestamo_id, clienteId: dbResult.cliente_id, client: form.client, dni: form.dni || '', phone: form.phone, address: form.address || '', risk: String(form.risk).toLowerCase(), principal: form.principal, rate: form.rate, installments: form.installments, installment: form.schedule[0]?.monto_cuota ?? 0, paid: 0, status: 'Activo', next: form.schedule[0]?.fecha_vencimiento ?? form.firstDue, createdAt: new Date().toISOString(), origen: 'efectivo' }
+      const newLoan = { id: reference, dbId: dbResult.prestamo_id, clienteId: dbResult.cliente_id, client: form.client, dni: form.dni || '', phone: form.phone, address: form.address || '', risk: String(form.risk).toLowerCase(), principal: form.principal, rate: form.rate, installments: form.installments, frequency: form.frequency, installment: form.schedule[0]?.monto_cuota ?? 0, paid: 0, status: 'Activo', next: form.schedule[0]?.fecha_vencimiento ?? form.firstDue, createdAt: new Date().toISOString(), origen: 'efectivo' }
       const newPayments = (dbResult.cuotas ?? form.schedule).map((q) => ({ id: q.id ?? `${reference}-${q.numero ?? q.numero_cuota}`, loanId: reference, client: form.client, phone: form.phone, amount: Number(q.monto ?? q.monto_cuota), capital: Number(q.capital ?? q.capital_cuota), interest: Number(q.interes ?? q.interes_cuota), due: q.fecha_vencimiento, status: 'Pendiente', n: q.numero ?? q.numero_cuota, totalQuotas: form.installments, origen: 'efectivo' }))
       setLoans((prev) => [newLoan, ...prev])
       setAllLoans((prev) => [{ ...newLoan, totalRecuperado: 0 }, ...prev])
@@ -3617,13 +3635,20 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
 ═══════════════════════════════════════════════════════════════ */
 function AjustarPrestamoModal({ loan, onClose, onSave }) {
   const [rate, setRate] = useState(String(loan?.rate ?? ''))
-  const [dueDate, setDueDate] = useState(localDateKey())
+  const [period, setPeriod] = useState(loan?.frequency === 'diario' ? 'diario' : loan?.frequency === 'mensual' ? 'mensual' : 'quincenal')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const principal = Number(loan?.principal || 0)
   const collected = Number(loan?.totalRecuperado || 0)
   const newTotal = Math.round(principal * (1 + (Number(rate) || 0) / 100) * 100) / 100
   const remaining = Math.max(0, Math.round((newTotal - collected) * 100) / 100)
+  const todayKey = localDateKey()
+  const loanDate = loan?.createdAt ? localDateKey(new Date(loan.createdAt)) : todayKey
+  const calculatedDate = addPeriodToDateKey(loanDate, period)
+  const dueDate = calculatedDate < todayKey ? todayKey : calculatedDate
+  const elapsedDays = Math.max(0, daysBetweenDateKeys(loanDate, todayKey))
+  const daysRemaining = Math.max(0, daysBetweenDateKeys(todayKey, dueDate))
+  const periodLabel = period === 'diario' ? 'Diario · 1 día' : period === 'quincenal' ? 'Quincenal · 15 días' : 'Mensual · 1 mes'
 
   async function submit(event) {
     event.preventDefault()
@@ -3631,11 +3656,10 @@ function AjustarPrestamoModal({ loan, onClose, onSave }) {
       setError('Ingresá una tasa válida, igual o mayor a cero.')
       return
     }
-    if (!dueDate) { setError('Elegí la fecha acordada para cobrar.'); return }
     setSaving(true)
     setError('')
     try {
-      const saved = await onSave({ rate:Number(rate), dueDate })
+      const saved = await onSave({ rate:Number(rate), dueDate, period })
       if (!saved) setError('No se pudo guardar el ajuste. Revisá el mensaje y volvé a intentar.')
     } finally { setSaving(false) }
   }
@@ -3648,14 +3672,19 @@ function AjustarPrestamoModal({ loan, onClose, onSave }) {
           <div className="pn-adjust-loan-client"><small>{loan?.id} · {loan?.client}</small><b>Capital prestado: {fmt(principal)}</b></div>
           <div className="form-grid">
             <label className="field"><span>Tasa acordada para el cobro (%)</span><input type="number" min="0" max="10000" step="0.01" value={rate} onChange={e => setRate(e.target.value)} required autoFocus/></label>
-            <label className="field"><span>Fecha para cobrar las cuotas pendientes</span><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required/></label>
+            <label className="field"><span>Período acordado</span><select value={period} onChange={e => setPeriod(e.target.value)}><option value="diario">Diario · 1 día</option><option value="quincenal">Quincenal · 15 días</option><option value="mensual">Mensual · 1 mes</option></select></label>
+          </div>
+          <div className="pn-adjust-loan-date" aria-live="polite">
+            <Calendar size={15}/>
+            <span>El préstamo se hizo el <b>{new Date(`${loanDate}T12:00:00`).toLocaleDateString('es-AR')}</b>. Pasaron <b>{elapsedDays} día{elapsedDays === 1 ? '' : 's'}</b>.</span>
+            <strong>{calculatedDate < todayKey ? `Período ${periodLabel}: ya se cumplió · cobrable hoy (${new Date(`${dueDate}T12:00:00`).toLocaleDateString('es-AR')})` : `Período ${periodLabel}: vence el ${new Date(`${dueDate}T12:00:00`).toLocaleDateString('es-AR')} · ${daysRemaining === 0 ? 'hoy' : `faltan ${daysRemaining} días`}`}</strong>
           </div>
           <div className="pn-adjust-loan-summary">
             <div><small>Nuevo total del préstamo</small><b>{fmt(newTotal)}</b></div>
             <div><small>Ya cobrado</small><b>{fmt(collected)}</b></div>
             <div><small>Saldo estimado</small><b>{fmt(remaining)}</b></div>
           </div>
-          <p className="pn-adjust-loan-note">Se recalculan los importes de las cuotas pendientes con esta tasa y se cambia su vencimiento a la fecha elegida. Los cobros ya registrados se conservan. Después vas a poder cobrarlas desde la ficha del cliente.</p>
+          <p className="pn-adjust-loan-note">La fecha se calcula desde el día en que se creó el préstamo. Se recalculan las cuotas pendientes con la tasa acordada y el período elegido. Los cobros ya registrados se conservan. Después vas a poder cobrarlas desde la ficha del cliente.</p>
           {error && <p className="pn-field-error pn-field-error-block" role="alert">{error}</p>}
         </div>
         <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="primary-button" disabled={saving || remaining <= 0}>{saving ? <Spinner size={14}/> : <Check size={14}/>} Guardar ajuste</button></div>

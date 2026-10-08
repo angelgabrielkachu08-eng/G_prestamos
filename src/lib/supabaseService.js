@@ -165,6 +165,7 @@ export async function cargarCarteraCompleta(userId) {
       principal: Number(l.capital),
       rate: Number(l.tasa_interes),
       installments: l.cantidad_cuotas,
+      frequency: l.frecuencia,
       installment: quotas[0]?.monto ?? 0,
       paid: paidCount,
       status:
@@ -597,6 +598,7 @@ export async function cargarHistorialPrestamos(userId) {
       principal:      Number(l.capital),
       rate:           Number(l.tasa_interes),
       installments:   l.cantidad_cuotas,
+      frequency:      l.frecuencia,
       paid:           paidCount,
       totalRecuperado,
       status:
