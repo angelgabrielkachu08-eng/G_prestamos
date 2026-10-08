@@ -1528,8 +1528,12 @@ export default function App() {
       showToast(`Préstamo ${loan.id} actualizado. Las cuotas pendientes ya se pueden cobrar desde hoy.`)
       return true
     } catch (err) {
-      showToast(`No se pudo ajustar el préstamo: ${friendlyConnectionError(err.message)}`, 'error')
-      return false
+      const errorMessage = String(err?.message || '')
+      const friendlyError = /PGRST202|Could not find the function|schema cache/i.test(errorMessage)
+        ? 'Falta aplicar en Supabase la migración 20261008090000_prestaneo_ajuste_pago_anticipado.sql. Ejecutala desde Supabase → SQL Editor y volvé a intentar.'
+        : friendlyConnectionError(errorMessage || 'Error inesperado al guardar el ajuste.')
+      showToast(`No se pudo ajustar el préstamo: ${friendlyError}`, 'error')
+      return friendlyError
     }
   }
 
@@ -3660,7 +3664,7 @@ function AjustarPrestamoModal({ loan, onClose, onSave }) {
     setError('')
     try {
       const saved = await onSave({ rate:Number(rate), dueDate, period })
-      if (!saved) setError('No se pudo guardar el ajuste. Revisá el mensaje y volvé a intentar.')
+      if (saved !== true) setError(typeof saved === 'string' ? saved : 'No se pudo guardar el ajuste. Volvé a intentar.')
     } finally { setSaving(false) }
   }
 
