@@ -19,7 +19,7 @@ import { isSupabaseConfigured } from './lib/supabase'
 import { calcularPrestamoDirecto } from './utils/loanCalculator'
 import {
   signInWithGoogle, signOut as supabaseSignOut, getSession, onAuthStateChange,
-  cargarCarteraCompleta, crearPrestamo, registrarPago, cargarPromesasPago, crearPromesaPago,
+  cargarCarteraCompleta, crearPrestamo, registrarPago, ajustarPrestamoAnticipado, cargarPromesasPago, crearPromesaPago,
   buscarClientesPorNombre, actualizarCliente,
   cargarHistorialPrestamos, cobradoPorMes,
   // Módulo ventas
@@ -585,6 +585,7 @@ const HELP_CONTENT = {
     sections: [
       { heading: '¿Qué muestra cada tarjeta?', text: 'Nombre, teléfono, capital prestado y progreso de cuotas. Abrí la ficha para revisar su historial y deuda pendiente.' },
       { heading: '¿Qué es la ficha de cliente?', text: 'Al tocar "Ver ficha" accedés a su historial completo: todos los préstamos, compras a crédito, deuda total pendiente y acciones directas (WhatsApp, volver a prestar, archivar).' },
+      { heading: '¿Qué hago si acuerda pagar antes?', text: 'En el bloque del préstamo podés ajustar la tasa acordada y la fecha de cobro. Se recalculan las cuotas pendientes y se conservan los cobros anteriores.' },
       { heading: '¿Qué pasa si archivás un cliente?', text: 'No se borra. Se mueve a la Papelera con todos sus datos e historial intactos. Podés restaurarlo cuando quieras desde la sección Papelera.' },
     ],
   },
@@ -1107,6 +1108,7 @@ export default function App() {
   const [paymentPromises, setPaymentPromises] = useState([])
   const [promiseTarget, setPromiseTarget] = useState(null)
   const [editTarget, setEditTarget]       = useState(null) // cliente a editar
+  const [adjustLoanTarget, setAdjustLoanTarget] = useState(null)
   const [cmdOpen, setCmdOpen]             = useState(false)
   const [tourOpen, setTourOpen]           = useState(false)
   const [tourStep, setTourStep]           = useState(0)
@@ -1497,6 +1499,20 @@ export default function App() {
       setEditTarget(null)
       showToast(`Cliente ${campos.nombre} actualizado`)
     } catch (err) { showToast(`No se pudo actualizar: ${err.message}`, 'error') }
+  }
+
+  const handleAdjustLoan = async (loan, form) => {
+    if (!user || !loan?.dbId) return false
+    try {
+      await ajustarPrestamoAnticipado(loan.dbId, form.rate, form.dueDate)
+      await loadData(user.id)
+      setAdjustLoanTarget(null)
+      showToast(`Préstamo ${loan.id} actualizado. Las cuotas pendientes ya se pueden cobrar desde hoy.`)
+      return true
+    } catch (err) {
+      showToast(`No se pudo ajustar el préstamo: ${friendlyConnectionError(err.message)}`, 'error')
+      return false
+    }
   }
 
   /* handleCreateVenta — crea venta a crédito y actualiza estado local */
@@ -1918,7 +1934,7 @@ export default function App() {
               {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={requestPaymentConfirmation} />}
               {tab === 'p_nuevo'    && <LoanModal inline onClose={() => setTab('p_inicio')} onCreate={handleCreateLoan} userId={user?.id} />}
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} promises={paymentPromises} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} />}
-              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
+              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onAdjustLoan={setAdjustLoanTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} />}
 
@@ -2001,6 +2017,9 @@ export default function App() {
       </AnimatePresence>
       <AnimatePresence>
         {editTarget && <EditClientModal client={editTarget} onClose={() => setEditTarget(null)} onSave={handleEditClient} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {adjustLoanTarget && <AjustarPrestamoModal loan={adjustLoanTarget} onClose={() => setAdjustLoanTarget(null)} onSave={form => handleAdjustLoan(adjustLoanTarget, form)} />}
       </AnimatePresence>
       <AnimatePresence>
         {cmdOpen && <CommandPalette
@@ -3590,6 +3609,59 @@ function LoanModal({ onClose, onCreate, userId, prefill = {}, inline = false }) 
       </motion.div>
     </motion.div>,
     document.body
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AJUSTE DE PRÉSTAMO — tasa acordada y cobro anticipado
+═══════════════════════════════════════════════════════════════ */
+function AjustarPrestamoModal({ loan, onClose, onSave }) {
+  const [rate, setRate] = useState(String(loan?.rate ?? ''))
+  const [dueDate, setDueDate] = useState(localDateKey())
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const principal = Number(loan?.principal || 0)
+  const collected = Number(loan?.totalRecuperado || 0)
+  const newTotal = Math.round(principal * (1 + (Number(rate) || 0) / 100) * 100) / 100
+  const remaining = Math.max(0, Math.round((newTotal - collected) * 100) / 100)
+
+  async function submit(event) {
+    event.preventDefault()
+    if (!Number.isFinite(Number(rate)) || Number(rate) < 0 || Number(rate) > 10000) {
+      setError('Ingresá una tasa válida, igual o mayor a cero.')
+      return
+    }
+    if (!dueDate) { setError('Elegí la fecha acordada para cobrar.'); return }
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await onSave({ rate:Number(rate), dueDate })
+      if (!saved) setError('No se pudo guardar el ajuste. Revisá el mensaje y volvé a intentar.')
+    } finally { setSaving(false) }
+  }
+
+  return createPortal(
+    <motion.div className="modal-backdrop" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onMouseDown={e => e.target === e.currentTarget && !saving && onClose()}>
+      <motion.form className="loan-modal pn-adjust-loan-modal" onSubmit={submit} initial={{ y:18, opacity:0, scale:.97 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:12, opacity:0, scale:.98 }}>
+        <div className="modal-header"><Calendar size={18}/><span>Ajustar cobro anticipado</span><button type="button" className="icon-button" onClick={onClose} disabled={saving} style={{ marginLeft:'auto' }} aria-label="Cerrar"><X size={16}/></button></div>
+        <div className="modal-body">
+          <div className="pn-adjust-loan-client"><small>{loan?.id} · {loan?.client}</small><b>Capital prestado: {fmt(principal)}</b></div>
+          <div className="form-grid">
+            <label className="field"><span>Tasa acordada para el cobro (%)</span><input type="number" min="0" max="10000" step="0.01" value={rate} onChange={e => setRate(e.target.value)} required autoFocus/></label>
+            <label className="field"><span>Fecha para cobrar las cuotas pendientes</span><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required/></label>
+          </div>
+          <div className="pn-adjust-loan-summary">
+            <div><small>Nuevo total del préstamo</small><b>{fmt(newTotal)}</b></div>
+            <div><small>Ya cobrado</small><b>{fmt(collected)}</b></div>
+            <div><small>Saldo estimado</small><b>{fmt(remaining)}</b></div>
+          </div>
+          <p className="pn-adjust-loan-note">Se recalculan los importes de las cuotas pendientes con esta tasa y se cambia su vencimiento a la fecha elegida. Los cobros ya registrados se conservan. Después vas a poder cobrarlas desde la ficha del cliente.</p>
+          {error && <p className="pn-field-error pn-field-error-block" role="alert">{error}</p>}
+        </div>
+        <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button type="submit" className="primary-button" disabled={saving || remaining <= 0}>{saving ? <Spinner size={14}/> : <Check size={14}/>} Guardar ajuste</button></div>
+      </motion.form>
+    </motion.div>,
+    document.body,
   )
 }
 
@@ -5396,7 +5468,7 @@ function LegalDialog({ section = 'terms', onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES PRESTAMOS
 ═══════════════════════════════════════════════════════════════ */
-function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, onPromise, payments = [], receipts = [], promises = [] }) {
+function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onAdjustLoan, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, onPromise, payments = [], receipts = [], promises = [] }) {
   const [q,        setQ]   = useState('')
   const [selected, setSel] = useState(null)
   const [expandedInstallment, setExpandedInstallment] = useState(null)
@@ -5492,9 +5564,12 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
               <span className="pn-panel-title"><HandCoins size={14}/> Cuotas pendientes de cobro</span>
             </div>
             <div style={{ padding:'8px 14px 14px', display:'flex', flexDirection:'column', gap:8 }}>
-              {[...cuotasByLoan.entries()].map(([loanId, cuotas]) => (
-                <div key={loanId} className="ficha-loan-block">
-                  <div className="ficha-loan-ref"><span className="mono">{loanId}</span></div>
+              {[...cuotasByLoan.entries()].map(([loanId, cuotas]) => {
+                const loanToAdjust = cl.find(loan => loan.id === loanId)
+                return <div key={loanId} className="ficha-loan-block">
+                  <div className="ficha-loan-ref"><span className="mono">{loanId}</span>
+                    {loanToAdjust && loanToAdjust.origen !== 'venta' && <button type="button" className="pn-btn-outline pn-btn-sm" onClick={() => onAdjustLoan?.(loanToAdjust)}><Calendar size={12}/> Ajustar cobro anticipado</button>}
+                  </div>
                   {cuotas.map(p => {
                     const dias    = daysUntil(p.due)
                     const vencida = dias < 0 || p.status === 'Vencido'
@@ -5543,7 +5618,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                     </details>
                   )}
                 </div>
-              ))}
+              })}
             </div>
           </div>
         )}

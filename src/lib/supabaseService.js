@@ -331,6 +331,21 @@ export async function crearPrestamo(userId, form) {
   }
 }
 
+/**
+ * Recalcula un préstamo de efectivo cuando se acuerda una tasa por cancelación
+ * anticipada y adelanta las cuotas pendientes a la fecha pactada. La RPC conserva
+ * los pagos previos y actualiza el plan en una única transacción.
+ */
+export async function ajustarPrestamoAnticipado(prestamoId, tasa, fechaCobro) {
+  const { data, error } = await supabase.rpc('ajustar_prestamo_anticipado', {
+    p_prestamo_id: prestamoId,
+    p_tasa: Number(tasa),
+    p_fecha_cobro: fechaCobro,
+  })
+  if (error) throw new Error(error.message)
+  return data
+}
+
 /* ─────────────────────────────────────────────
    COBROS / PAGOS
 ───────────────────────────────────────────── */
