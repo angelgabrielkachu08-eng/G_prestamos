@@ -28,6 +28,7 @@ import {
   // Papelera
   archivarCliente, restaurarCliente, cargarPapelera, cargarFichaCliente, eliminarClientePermanente,
   anularMovimientosCaja, restaurarMovimientoCaja,
+  cargarCierresCaja, cerrarPeriodoCaja,
 } from './lib/supabaseService'
 
 const exportComprobanteDocx = async (...args) =>
@@ -82,21 +83,6 @@ function daysBetweenDateKeys(start, end) {
   const from = new Date(`${start}T12:00:00`)
   const to = new Date(`${end}T12:00:00`)
   return Math.round((to.getTime() - from.getTime()) / 86400000)
-}
-function cashMovementMonth(movement) {
-  return movement?.rawDate ? localDateKey(new Date(movement.rawDate)).slice(0, 7) : ''
-}
-function cashMonthRange(movements) {
-  const current = localDateKey().slice(0, 7)
-  const history = movements.map(cashMovementMonth).filter(month => month && month <= current).sort()
-  const first = history[0] || current
-  const cursor = new Date(`${first}-01T12:00:00`)
-  const months = []
-  while (localDateKey(cursor).slice(0, 7) <= current) {
-    months.push(localDateKey(cursor).slice(0, 7))
-    cursor.setMonth(cursor.getMonth() + 1)
-  }
-  return months.reverse()
 }
 const readReminderStorage = (key) => {
   try {
@@ -639,7 +625,7 @@ const HELP_CONTENT = {
     sections: [
       { heading: '¿Qué registra la caja?', text: 'Entradas: cobros de cuotas. Salidas: dinero prestado (desembolsos). El balance es la diferencia: lo que tenés disponible para prestar.' },
       { heading: '¿Se actualiza sola?', text: 'Sí. Cada vez que marcás una cuota como pagada o creás un préstamo, la caja se actualiza automáticamente. No tenés que ingresar nada manualmente.' },
-      { heading: '¿Cómo consulto el cierre de un mes?', text: 'Elegí un mes en el historial mensual para ver saldo inicial, entradas, salidas y saldo de cierre. Se calcula con los movimientos guardados de Préstamos; podés volver a consultar meses anteriores.' },
+      { heading: '¿Cómo cierro un período?', text: 'Usá Cerrar período para guardar una copia de las entradas, salidas y movimientos de Préstamos. El próximo período empieza desde cero y podés volver a consultar cada cierre guardado.' },
       { heading: '¿Cómo exporto un reporte?', text: 'Tocá "Generar reporte". Podés elegir Word o Excel, filtrando por período o por cliente. El Word incluye cronograma y el Excel tiene 3 hojas para analizar.' },
     ],
   },
@@ -702,7 +688,7 @@ const HELP_CONTENT = {
     sections: [
       { heading: '¿Qué muestra?', text: 'Los anticipos y cuotas cobrados por ventas, el importe financiado que sigue pendiente y los movimientos de caja asociados al módulo de ventas.' },
       { heading: '¿Cómo leer el resumen?', text: 'Disponible ahora refleja entradas menos salidas registradas. Pendiente de cobro suma las cuotas de ventas todavía abiertas. La proyección agrega ese saldo pendiente al disponible actual.' },
-      { heading: '¿Cómo consulto el cierre de un mes?', text: 'Elegí un mes en el historial mensual para revisar saldo inicial, cobros, salidas y saldo de cierre de la caja de Ventas, incluso en meses anteriores.' },
+      { heading: '¿Cómo cierro un período?', text: 'Usá Cerrar período para guardar una copia de los cobros, salidas y movimientos de Ventas. El próximo período empieza desde cero y podés volver a consultar cada cierre guardado.' },
       { heading: '¿Cómo exportar?', text: 'Abrí Generar reporte para descargar los movimientos de ventas y su resumen. Revisá el período elegido antes de guardar el archivo.' },
     ],
   },
@@ -1975,7 +1961,7 @@ export default function App() {
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} promises={paymentPromises} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} />}
               {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onAdjustLoan={setAdjustLoanTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
-              {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} />}
+              {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} userId={user.id} />}
 
               {/* ── MÓDULO VENTAS ── */}
               {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} productos={productos} totals={totalsVentas} loading={loading} go={setTab} />}
@@ -1984,7 +1970,7 @@ export default function App() {
               {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} onReport={() => setExportOpen(true)} />}
               {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onArchive={handleArchivarCliente} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
               {tab === 'v_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
-              {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} />}
+              {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} userId={user.id} />}
 
             </motion.div>
           </AnimatePresence>
@@ -2667,10 +2653,15 @@ function VoidCashModal({ count, bulk, mode, onClose, onConfirm }) {
   )
 }
 
-function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreMovement, mode = 'prestamos', ventas = [], payments = [] }) {
+function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreMovement, mode = 'prestamos', ventas = [], payments = [], userId }) {
   const [q,          setQ]     = useState('')
   const [filtro,     setFiltro]= useState('Todos')
-  const [selectedMonth, setSelectedMonth] = useState(() => localDateKey().slice(0, 7))
+  const [closures, setClosures] = useState([])
+  const [loadedClosuresMode, setLoadedClosuresMode] = useState('')
+  const [closureError, setClosureError] = useState('')
+  const [selectedClosureId, setSelectedClosureId] = useState('actual')
+  const [closingPeriod, setClosingPeriod] = useState(false)
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [busyIds, setBusyIds] = useState([])
   const [voidTarget, setVoidTarget] = useState(null)
 
@@ -2684,19 +2675,33 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
     ? payments.filter(p => p.status !== 'Pagado').reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
     : Number(totals.pendingAmount ?? 0)
   const recaudacionEsperada = balance + deudaTotal
-  const monthOptions = useMemo(() => cashMonthRange(ledger), [ledger])
-  const monthSummary = useMemo(() => {
-    const validLedger = ledger.filter(m => !m.voided)
-    const previous = selectedMonth === 'todos' ? [] : validLedger.filter(m => cashMovementMonth(m) < selectedMonth)
-    const current = selectedMonth === 'todos' ? validLedger : validLedger.filter(m => cashMovementMonth(m) === selectedMonth)
-    const opening = previous.reduce((sum, m) => sum + (m.type === 'Entrada' ? Number(m.amount) : -Number(m.amount)), 0)
-    const incoming = current.filter(m => m.type === 'Entrada').reduce((sum, m) => sum + Number(m.amount), 0)
-    const outgoing = current.filter(m => m.type !== 'Entrada').reduce((sum, m) => sum + Number(m.amount), 0)
-    return { opening, incoming, outgoing, closing:opening + incoming - outgoing }
-  }, [ledger, selectedMonth])
-  const monthLabel = selectedMonth === 'todos'
-    ? 'todo el historial'
-    : new Intl.DateTimeFormat('es-AR', { month:'long', year:'numeric' }).format(new Date(`${selectedMonth}-15T12:00:00`))
+  useEffect(() => {
+    let active = true
+    cargarCierresCaja(userId, mode).then(rows => {
+      if (active) { setClosures(rows); setClosureError(''); setLoadedClosuresMode(mode) }
+    }).catch(error => {
+      if (active) { setClosureError(error.message || 'No se pudo cargar el historial de cierres.'); setLoadedClosuresMode(mode) }
+    })
+    return () => { active = false }
+  }, [userId, mode])
+  const closuresLoading = loadedClosuresMode !== mode
+  const selectedClosure = selectedClosureId === 'actual' ? null : closures.find(item => item.id === selectedClosureId) ?? null
+  const activeClosure = closures[0] ?? null
+  const periodStart = useMemo(() => activeClosure?.cerrado_at
+    ? new Date(activeClosure.cerrado_at)
+    : new Date(`${localDateKey().slice(0, 7)}-01T00:00:00`), [activeClosure])
+  const periodLedger = useMemo(() => selectedClosure
+    ? (Array.isArray(selectedClosure.movimientos) ? selectedClosure.movimientos.map(m => ({ ...m, time:m.time ?? new Date(m.rawDate).toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' }) })) : [])
+    : ledger.filter(m => m.rawDate && new Date(m.rawDate) > periodStart), [ledger, periodStart, selectedClosure])
+  const periodSummary = selectedClosure?.resumen ?? (() => {
+    const valid = periodLedger.filter(m => !m.voided)
+    const entradas = valid.filter(m => m.type === 'Entrada').reduce((sum, m) => sum + Number(m.amount), 0)
+    const salidas = valid.filter(m => m.type !== 'Entrada').reduce((sum, m) => sum + Number(m.amount), 0)
+    return { entradas, salidas, neto:entradas-salidas, movimientos:periodLedger.length }
+  })()
+  const periodTitle = selectedClosure
+    ? `Cerrado el ${new Date(selectedClosure.cerrado_at).toLocaleString('es-AR', { dateStyle:'medium', timeStyle:'short' })}`
+    : `Período actual · desde ${periodStart.toLocaleDateString('es-AR')}`
   const deudaPorCliente = useMemo(() => {
     const map = new Map()
     payments.filter(p => p.status !== 'Pagado' && Number(p.amount) > 0).forEach(p => {
@@ -2709,21 +2714,31 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
     return [...map.values()].sort((a,b) => b.amount-a.amount)
   }, [payments])
 
-  const visible = useMemo(() => ledger.filter(m => {
+  const visible = useMemo(() => periodLedger.filter(m => {
     const okTipo = filtro === 'Todos' ? !m.voided : filtro === 'Anulados' ? m.voided : !m.voided && m.type === filtro
     const okQ    = !q.trim() || m.label.toLowerCase().includes(q.toLowerCase())
-    const okMonth = selectedMonth === 'todos' || cashMovementMonth(m) === selectedMonth
-    return okTipo && okQ && okMonth
-  }), [ledger, filtro, q, selectedMonth])
-  const wholeLedgerVisible = selectedMonth === 'todos' && filtro === 'Todos' && !q.trim()
+    return okTipo && okQ
+  }), [periodLedger, filtro, q])
+  const handleClosePeriod = async () => {
+    setClosingPeriod(true)
+    try {
+      const saved = await cerrarPeriodoCaja(mode)
+      setClosures(previous => [saved, ...previous.filter(item => item.id !== saved.id)])
+      setSelectedClosureId('actual')
+      setClosureError('')
+      setLoadedClosuresMode(mode)
+      setShowCloseConfirm(false)
+    } catch (error) {
+      setClosureError(error.message || 'No se pudo guardar el cierre de caja.')
+    } finally { setClosingPeriod(false) }
+  }
 
   const requestVoid = (rows, bulk = false) => {
-    const scopeAll = bulk && wholeLedgerVisible
     const selectedRows = bulk ? visible.filter(row => !row.voided) : rows
     const ids = selectedRows.map(row => row.id).filter(Boolean)
     if (!bulk && !ids.length) return
-    if (bulk && !scopeAll && !ids.length) return
-    setVoidTarget({ ids, bulk, scopeAll, count:scopeAll ? ledger.filter(m=>!m.voided).length : ids.length })
+    if (bulk && !ids.length) return
+    setVoidTarget({ ids, bulk, scopeAll:false, count:ids.length })
   }
 
   return (
@@ -2761,22 +2776,38 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
       <section className="pn-cash-month-panel">
         <div className="pn-cash-month-heading">
           <div>
-            <span className="pn-panel-title"><Calendar size={15}/> Historial mensual de caja</span>
-            <small>Cierre de {monthLabel} · {mode === 'ventas' ? 'Ventas' : 'Préstamos'}</small>
+            <span className="pn-panel-title"><Calendar size={15}/> Períodos y cierres de caja</span>
+            <small>{periodTitle} · {mode === 'ventas' ? 'Ventas' : 'Préstamos'} · {periodSummary.movimientos ?? 0} movimientos guardados</small>
           </div>
-          <label className="pn-cash-month-select"><span>Consultar período</span><select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
-            <option value="todos">Todos los meses</option>
-            {monthOptions.map(month => <option key={month} value={month}>{new Intl.DateTimeFormat('es-AR', { month:'long', year:'numeric' }).format(new Date(`${month}-15T12:00:00`))}</option>)}
-          </select></label>
+          <div className="pn-cash-period-actions">
+            <label className="pn-cash-month-select"><span>Consultar</span><select value={selectedClosureId} onChange={e => setSelectedClosureId(e.target.value)}>
+              <option value="actual">Período actual</option>
+              {closures.map((item, index) => <option key={item.id} value={item.id}>Cierre {closures.length-index} · {new Date(item.cerrado_at).toLocaleDateString('es-AR')}</option>)}
+            </select></label>
+            {!selectedClosure && <button type="button" className="pn-btn-primary pn-cash-close-period" onClick={() => setShowCloseConfirm(true)} disabled={closingPeriod || closuresLoading || Boolean(closureError)}>
+              {closingPeriod ? <Loader2 size={14} className="pn-spin"/> : <ArchiveRestore size={14}/>} Cerrar período
+            </button>}
+          </div>
         </div>
         <div className="pn-cash-month-kpis">
-          <div><small>{selectedMonth === 'todos' ? 'Saldo al inicio del historial' : 'Saldo inicial del mes'}</small><b>{fmt(monthSummary.opening)}</b></div>
-          <div><small>Entradas</small><b className="text-green">{fmt(monthSummary.incoming)}</b></div>
-          <div><small>Salidas y ajustes</small><b className="text-red">{fmt(monthSummary.outgoing)}</b></div>
-          <div><small>{selectedMonth === 'todos' ? 'Balance histórico' : 'Cierre del mes'}</small><b className={monthSummary.closing >= 0 ? 'text-green' : 'text-red'}>{fmt(monthSummary.closing)}</b></div>
+          <div><small>Saldo inicial del período</small><b>{fmt(0)}</b></div>
+          <div><small>Entradas / recaudado</small><b className="text-green">{fmt(periodSummary.entradas)}</b></div>
+          <div><small>Salidas / desembolsos</small><b className="text-red">{fmt(periodSummary.salidas)}</b></div>
+          <div><small>Resultado neto de caja</small><b className={periodSummary.neto >= 0 ? 'text-green' : 'text-red'}>{fmt(periodSummary.neto)}</b></div>
         </div>
-        <p>{selectedMonth === 'todos' ? 'Balance acumulado de todos los movimientos guardados. Los anulados no se cuentan.' : 'El cierre se reconstruye con los movimientos guardados hasta el último día del mes. Los movimientos anulados no se cuentan.'}</p>
+        {closureError && <p className="pn-cash-closure-error">{closureError}</p>}
+        {!closureError && <p>{selectedClosure ? 'Este es un cierre guardado como foto del período; el detalle se conserva aunque luego cambien los movimientos actuales.' : 'El período comienza en cero. Al cerrarlo, se guarda una copia del resumen y sus movimientos, y se inicia otro período vacío.'}</p>}
       </section>
+
+      <AnimatePresence>
+        {showCloseConfirm && <motion.div className="modal-backdrop" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onMouseDown={e => e.target === e.currentTarget && !closingPeriod && setShowCloseConfirm(false)}>
+          <motion.div className="loan-modal pn-close-period-modal" initial={{opacity:0,y:14,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:8,scale:.98}}>
+            <div className="modal-header"><ArchiveRestore size={18} color="#00ff87"/><span>Guardar cierre de caja</span><button type="button" className="icon-button" style={{marginLeft:'auto'}} onClick={()=>setShowCloseConfirm(false)} disabled={closingPeriod} aria-label="Cerrar"><X size={16}/></button></div>
+            <div className="modal-body"><p>Se guardará una copia de los movimientos de este período de <b>{mode === 'ventas' ? 'Ventas' : 'Préstamos'}</b>, junto con entradas, salidas y resultado neto.</p><p>Después del cierre, el período actual comenzará en <b>$ 0</b>. El saldo disponible general y las cuotas pendientes no se borran.</p></div>
+            <div className="modal-footer"><button type="button" className="secondary-button" onClick={()=>setShowCloseConfirm(false)} disabled={closingPeriod}>Seguir revisando</button><button type="button" className="pn-btn-primary" onClick={handleClosePeriod} disabled={closingPeriod}>{closingPeriod?<Loader2 size={14} className="pn-spin"/>:<Check size={14}/>} Confirmar cierre</button></div>
+          </motion.div>
+        </motion.div>}
+      </AnimatePresence>
 
       {deudaPorCliente.length > 0 && (
         <section className="pn-panel pn-cash-debt-panel">
@@ -2806,8 +2837,8 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
           ))}
         </div>
         <span className="pn-count">{visible.length} mov.</span>
-        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={!visible.some(m => !m.voided) || busyIds.length > 0} onClick={() => requestVoid([], true)}>
-          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <ArchiveRestore size={14}/>} {wholeLedgerVisible ? 'Anular movimientos' : 'Anular visibles'}
+        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={Boolean(selectedClosure) || !visible.some(m => !m.voided) || busyIds.length > 0} onClick={() => requestVoid([], true)}>
+          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <ArchiveRestore size={14}/>} Anular visibles
         </button>
       </div>
 
@@ -2844,10 +2875,10 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
                         <td className="pn-td-muted">{m.time}</td>
                         <td>
                           {m.voided
-                            ? <button className="pn-btn-icon pn-cash-restore" type="button" title="Restaurar movimiento" aria-label={`Restaurar movimiento: ${m.label}`} disabled={busyIds.includes(m.id)} onClick={async () => { setBusyIds([m.id]); await onRestoreMovement?.(m.id); setBusyIds([]) }}>
+                            ? <button className="pn-btn-icon pn-cash-restore" type="button" title={selectedClosure ? 'Estado guardado en el cierre' : 'Restaurar movimiento'} aria-label={`Restaurar movimiento: ${m.label}`} disabled={Boolean(selectedClosure) || busyIds.includes(m.id)} onClick={async () => { setBusyIds([m.id]); await onRestoreMovement?.(m.id); setBusyIds([]) }}>
                                 {busyIds.includes(m.id) ? <Loader2 size={13} className="pn-spin"/> : <ArchiveRestore size={13}/>}
                               </button>
-                            : <button className="pn-btn-icon pn-btn-danger-icon pn-cash-delete" type="button" title="Anular movimiento" aria-label={`Anular movimiento: ${m.label}`} disabled={busyIds.includes(m.id)} onClick={() => requestVoid([m])}>
+                            : <button className="pn-btn-icon pn-btn-danger-icon pn-cash-delete" type="button" title={selectedClosure ? 'Movimiento guardado en cierre' : 'Anular movimiento'} aria-label={`Anular movimiento: ${m.label}`} disabled={Boolean(selectedClosure) || busyIds.includes(m.id)} onClick={() => requestVoid([m])}>
                                 {busyIds.includes(m.id) ? <Loader2 size={13} className="pn-spin"/> : <Trash2 size={13}/>}
                               </button>}
                         </td>

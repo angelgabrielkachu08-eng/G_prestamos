@@ -1080,6 +1080,29 @@ export async function anularMovimientosCaja(movementIds, scope = null, reason = 
   return Number(data) || 0
 }
 
+/** Cierres de caja guardados por módulo. */
+export async function cargarCierresCaja(userId, module) {
+  const { data, error } = await supabase
+    .from('cierres_caja')
+    .select('*')
+    .eq('owner_id', userId)
+    .eq('modulo', module)
+    .order('cerrado_at', { ascending: false })
+  if (error) throw new Error(error.code === '42P01'
+    ? 'Falta activar el historial de cierres. Aplicá en Supabase la migración 20261009120000_prestaneo_cierres_caja.sql.'
+    : error.message)
+  return data ?? []
+}
+
+/** Guarda atómicamente el cierre del período y su detalle de movimientos. */
+export async function cerrarPeriodoCaja(module) {
+  const { data, error } = await supabase.rpc('cerrar_periodo_caja', { p_modulo: module })
+  if (error) throw new Error(error.code === 'PGRST202' || error.code === '42883'
+    ? 'Falta activar los cierres de caja. Aplicá en Supabase la migración 20261009120000_prestaneo_cierres_caja.sql.'
+    : error.message)
+  return data
+}
+
 /** Restaura un movimiento anulado, conservando su motivo anterior en la auditoría. */
 export async function restaurarMovimientoCaja(movementId) {
   const { error } = await supabase.rpc('restaurar_movimiento_caja', { p_movimiento_id: movementId })
