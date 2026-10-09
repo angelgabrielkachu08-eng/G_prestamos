@@ -2754,13 +2754,15 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
         </motion.button>
       </div>
 
-      {/* Resumen explicado */}
+      <div className="pn-cash-current-note"><Wallet size={15}/><span><b>Situación actual del negocio</b><small>Este saldo y la deuda vigente no se reinician al cerrar. El cierre guarda los movimientos del período por separado; los clientes y cuotas pendientes siguen en sus fichas.</small></span></div>
+
+      {/* Resumen actual explicado */}
       <div className="pn-cash-strip pn-cash-strip-four">
         {[
-          { label:'Disponible ahora', value:balance, color:balance >= 0 ? 'green' : 'red', icon:Wallet, help:'Cobros recibidos menos dinero entregado.' },
-          { label:mode === 'ventas' ? 'Financiado' : 'Capital prestado', value:capitalColocado, color:'purple', icon:Landmark, help:mode === 'ventas' ? 'Importe financiado en ventas registradas.' : 'Capital originalmente entregado en préstamos activos.' },
-          { label:'Pendiente de cobro', value:deudaTotal, color:'amber', icon:Clock, help:'Saldo de cuotas aún no pagadas.' },
-          { label:'Proyección al cobrar', value:recaudacionEsperada, color:'green', icon:TrendingUp, help:'Saldo de hoy más las cuotas pendientes.' },
+          { label:'Saldo disponible actual', value:balance, color:balance >= 0 ? 'green' : 'red', icon:Wallet, help:'Efectivo global estimado: cobros recibidos menos dinero entregado. No se reinicia al cerrar un período.' },
+          { label:mode === 'ventas' ? 'Financiado acumulado' : 'Capital original activo', value:capitalColocado, color:'purple', icon:Landmark, help:mode === 'ventas' ? 'Importe originalmente financiado en ventas registradas; no es la deuda vigente.' : 'Capital originalmente entregado en préstamos que siguen activos; no es el saldo pendiente.' },
+          { label:'Deuda vigente por cobrar', value:deudaTotal, color:'amber', icon:Clock, help:'Saldo real de cuotas que todavía no fueron pagadas. Sigue vigente después de un cierre.' },
+          { label:'Disponible + deuda vigente', value:recaudacionEsperada, color:'green', icon:TrendingUp, help:'Proyección del saldo actual si se cobran todas las cuotas pendientes.' },
         ].map((k, i) => (
           <motion.div key={k.label} className={`pn-cash-card pn-cash-${k.color}`}
             initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*.07 }}>
@@ -5954,8 +5956,8 @@ function PrestamosInicio({ totals = {}, loans = [], payments = [], monthBars = [
   const maxBar = Math.max(...monthBars, 1)
 
   const kpis = [
-    { label:'Capital colocado',   value:totals.principal  || 0, icon:Landmark,     color:'purple', change:totals.cambioMes },
-    { label:'Interés esperado',   value:totals.interest   || 0, icon:TrendingUp,    color:'green',  change:null },
+    { label:'Capital en préstamos activos', value:totals.principal  || 0, icon:Landmark,     color:'purple', change:null },
+    { label:'Deuda vigente por cobrar', value:totals.pendingAmount || 0, icon:Clock,    color:'amber',  change:null },
     { label:'Cobrado hoy',        value:totals.cobradoHoy || 0, icon:ArrowDownLeft, color:'teal',   change:null },
     { label:'Caja disponible',    value:totals.caja       || 0, icon:Wallet,        color:'amber',  change:null },
   ]
@@ -5978,6 +5980,8 @@ function PrestamosInicio({ totals = {}, loans = [], payments = [], monthBars = [
           <Plus size={16}/> Emitir préstamo
         </motion.button>
       </div>
+
+      <div className="pn-current-state-note"><Wallet size={15}/><span><b>Situación actual</b><small>Estos indicadores muestran el estado vigente. Cerrar un período guarda sus movimientos, pero no borra el saldo de caja ni las cuotas pendientes.</small></span></div>
 
       <div className="pn-kpi-row">
         {kpis.map((k, i) => (
@@ -6081,10 +6085,10 @@ function VentasInicio({ ventas = [], payments = [], loans = [], productos = [], 
   const productosCriticos = productos.filter(p => Number(p.stock) <= 3)
 
   const kpis = [
-    { label:'Total vendido', value:totalVendido, icon:ShoppingCart, color:'purple' },
-    { label:'Total cobrado', value:totalCobrado, icon:Check, color:'green' },
-    { label:'Saldo por cobrar', value:saldoPorCobrar, icon:Clock, color:'amber' },
-    { label:'Caja ventas', value:totals.caja || 0, icon:Wallet, color:'teal' },
+    { label:'Ventas acumuladas', value:totalVendido, icon:ShoppingCart, color:'purple' },
+    { label:'Cobrado acumulado', value:totalCobrado, icon:Check, color:'green' },
+    { label:'Deuda vigente por cobrar', value:saldoPorCobrar, icon:Clock, color:'amber' },
+    { label:'Saldo actual de caja', value:totals.caja || 0, icon:Wallet, color:'teal' },
   ]
   const quick = [
     { label:'Nueva venta',icon:ShoppingCart,tab:'v_nueva',   desc:'Registrar venta' },
@@ -6104,6 +6108,7 @@ function VentasInicio({ ventas = [], payments = [], loans = [], productos = [], 
           <ShoppingCart size={16}/> Nueva venta
         </motion.button>
       </div>
+      <div className="pn-current-state-note"><Wallet size={15}/><span><b>Situación actual de ventas</b><small>Las ventas y cobros acumulados describen la actividad registrada. El saldo de caja y la deuda vigente continúan después del cierre de un período.</small></span></div>
       <div className="pn-kpi-row">
         {kpis.map((k,i) => (
           <motion.div key={k.label} className={`pn-kpi pn-kpi-${k.color}`}
