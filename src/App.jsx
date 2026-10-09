@@ -83,6 +83,21 @@ function daysBetweenDateKeys(start, end) {
   const to = new Date(`${end}T12:00:00`)
   return Math.round((to.getTime() - from.getTime()) / 86400000)
 }
+function cashMovementMonth(movement) {
+  return movement?.rawDate ? localDateKey(new Date(movement.rawDate)).slice(0, 7) : ''
+}
+function cashMonthRange(movements) {
+  const current = localDateKey().slice(0, 7)
+  const history = movements.map(cashMovementMonth).filter(month => month && month <= current).sort()
+  const first = history[0] || current
+  const cursor = new Date(`${first}-01T12:00:00`)
+  const months = []
+  while (localDateKey(cursor).slice(0, 7) <= current) {
+    months.push(localDateKey(cursor).slice(0, 7))
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return months.reverse()
+}
 const readReminderStorage = (key) => {
   try {
     const value = JSON.parse(localStorage.getItem(key) || '[]')
@@ -624,6 +639,7 @@ const HELP_CONTENT = {
     sections: [
       { heading: '¿Qué registra la caja?', text: 'Entradas: cobros de cuotas. Salidas: dinero prestado (desembolsos). El balance es la diferencia: lo que tenés disponible para prestar.' },
       { heading: '¿Se actualiza sola?', text: 'Sí. Cada vez que marcás una cuota como pagada o creás un préstamo, la caja se actualiza automáticamente. No tenés que ingresar nada manualmente.' },
+      { heading: '¿Cómo consulto el cierre de un mes?', text: 'Elegí un mes en el historial mensual para ver saldo inicial, entradas, salidas y saldo de cierre. Se calcula con los movimientos guardados de Préstamos; podés volver a consultar meses anteriores.' },
       { heading: '¿Cómo exporto un reporte?', text: 'Tocá "Generar reporte". Podés elegir Word o Excel, filtrando por período o por cliente. El Word incluye cronograma y el Excel tiene 3 hojas para analizar.' },
     ],
   },
@@ -686,6 +702,7 @@ const HELP_CONTENT = {
     sections: [
       { heading: '¿Qué muestra?', text: 'Los anticipos y cuotas cobrados por ventas, el importe financiado que sigue pendiente y los movimientos de caja asociados al módulo de ventas.' },
       { heading: '¿Cómo leer el resumen?', text: 'Disponible ahora refleja entradas menos salidas registradas. Pendiente de cobro suma las cuotas de ventas todavía abiertas. La proyección agrega ese saldo pendiente al disponible actual.' },
+      { heading: '¿Cómo consulto el cierre de un mes?', text: 'Elegí un mes en el historial mensual para revisar saldo inicial, cobros, salidas y saldo de cierre de la caja de Ventas, incluso en meses anteriores.' },
       { heading: '¿Cómo exportar?', text: 'Abrí Generar reporte para descargar los movimientos de ventas y su resumen. Revisá el período elegido antes de guardar el archivo.' },
     ],
   },
@@ -2653,6 +2670,7 @@ function VoidCashModal({ count, bulk, mode, onClose, onConfirm }) {
 function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreMovement, mode = 'prestamos', ventas = [], payments = [] }) {
   const [q,          setQ]     = useState('')
   const [filtro,     setFiltro]= useState('Todos')
+  const [selectedMonth, setSelectedMonth] = useState(() => localDateKey().slice(0, 7))
   const [busyIds, setBusyIds] = useState([])
   const [voidTarget, setVoidTarget] = useState(null)
 
@@ -2666,6 +2684,19 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
     ? payments.filter(p => p.status !== 'Pagado').reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
     : Number(totals.pendingAmount ?? 0)
   const recaudacionEsperada = balance + deudaTotal
+  const monthOptions = useMemo(() => cashMonthRange(ledger), [ledger])
+  const monthSummary = useMemo(() => {
+    const validLedger = ledger.filter(m => !m.voided)
+    const previous = selectedMonth === 'todos' ? [] : validLedger.filter(m => cashMovementMonth(m) < selectedMonth)
+    const current = selectedMonth === 'todos' ? validLedger : validLedger.filter(m => cashMovementMonth(m) === selectedMonth)
+    const opening = previous.reduce((sum, m) => sum + (m.type === 'Entrada' ? Number(m.amount) : -Number(m.amount)), 0)
+    const incoming = current.filter(m => m.type === 'Entrada').reduce((sum, m) => sum + Number(m.amount), 0)
+    const outgoing = current.filter(m => m.type !== 'Entrada').reduce((sum, m) => sum + Number(m.amount), 0)
+    return { opening, incoming, outgoing, closing:opening + incoming - outgoing }
+  }, [ledger, selectedMonth])
+  const monthLabel = selectedMonth === 'todos'
+    ? 'todo el historial'
+    : new Intl.DateTimeFormat('es-AR', { month:'long', year:'numeric' }).format(new Date(`${selectedMonth}-15T12:00:00`))
   const deudaPorCliente = useMemo(() => {
     const map = new Map()
     payments.filter(p => p.status !== 'Pagado' && Number(p.amount) > 0).forEach(p => {
@@ -2681,13 +2712,18 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
   const visible = useMemo(() => ledger.filter(m => {
     const okTipo = filtro === 'Todos' ? !m.voided : filtro === 'Anulados' ? m.voided : !m.voided && m.type === filtro
     const okQ    = !q.trim() || m.label.toLowerCase().includes(q.toLowerCase())
-    return okTipo && okQ
-  }), [ledger, filtro, q])
+    const okMonth = selectedMonth === 'todos' || cashMovementMonth(m) === selectedMonth
+    return okTipo && okQ && okMonth
+  }), [ledger, filtro, q, selectedMonth])
+  const wholeLedgerVisible = selectedMonth === 'todos' && filtro === 'Todos' && !q.trim()
 
   const requestVoid = (rows, bulk = false) => {
-    const ids = rows.map(row => row.id).filter(Boolean)
+    const scopeAll = bulk && wholeLedgerVisible
+    const selectedRows = bulk ? visible.filter(row => !row.voided) : rows
+    const ids = selectedRows.map(row => row.id).filter(Boolean)
     if (!bulk && !ids.length) return
-    setVoidTarget({ ids, bulk, count: bulk ? ledger.filter(m=>!m.voided).length : ids.length })
+    if (bulk && !scopeAll && !ids.length) return
+    setVoidTarget({ ids, bulk, scopeAll, count:scopeAll ? ledger.filter(m=>!m.voided).length : ids.length })
   }
 
   return (
@@ -2722,6 +2758,26 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
         ))}
       </div>
 
+      <section className="pn-cash-month-panel">
+        <div className="pn-cash-month-heading">
+          <div>
+            <span className="pn-panel-title"><Calendar size={15}/> Historial mensual de caja</span>
+            <small>Cierre de {monthLabel} · {mode === 'ventas' ? 'Ventas' : 'Préstamos'}</small>
+          </div>
+          <label className="pn-cash-month-select"><span>Consultar período</span><select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
+            <option value="todos">Todos los meses</option>
+            {monthOptions.map(month => <option key={month} value={month}>{new Intl.DateTimeFormat('es-AR', { month:'long', year:'numeric' }).format(new Date(`${month}-15T12:00:00`))}</option>)}
+          </select></label>
+        </div>
+        <div className="pn-cash-month-kpis">
+          <div><small>{selectedMonth === 'todos' ? 'Saldo al inicio del historial' : 'Saldo inicial del mes'}</small><b>{fmt(monthSummary.opening)}</b></div>
+          <div><small>Entradas</small><b className="text-green">{fmt(monthSummary.incoming)}</b></div>
+          <div><small>Salidas y ajustes</small><b className="text-red">{fmt(monthSummary.outgoing)}</b></div>
+          <div><small>{selectedMonth === 'todos' ? 'Balance histórico' : 'Cierre del mes'}</small><b className={monthSummary.closing >= 0 ? 'text-green' : 'text-red'}>{fmt(monthSummary.closing)}</b></div>
+        </div>
+        <p>{selectedMonth === 'todos' ? 'Balance acumulado de todos los movimientos guardados. Los anulados no se cuentan.' : 'El cierre se reconstruye con los movimientos guardados hasta el último día del mes. Los movimientos anulados no se cuentan.'}</p>
+      </section>
+
       {deudaPorCliente.length > 0 && (
         <section className="pn-panel pn-cash-debt-panel">
           <div className="pn-panel-header">
@@ -2750,8 +2806,8 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
           ))}
         </div>
         <span className="pn-count">{visible.length} mov.</span>
-        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={!ledger.some(m => !m.voided) || busyIds.length > 0} onClick={() => requestVoid([], true)}>
-          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <ArchiveRestore size={14}/>} Anular movimientos
+        <button className="pn-btn-danger pn-btn-sm pn-cash-clear" type="button" disabled={!visible.some(m => !m.voided) || busyIds.length > 0} onClick={() => requestVoid([], true)}>
+          {busyIds.length > 1 ? <Loader2 size={14} className="pn-spin"/> : <ArchiveRestore size={14}/>} {wholeLedgerVisible ? 'Anular movimientos' : 'Anular visibles'}
         </button>
       </div>
 
@@ -2806,9 +2862,9 @@ function Cash({ ledger, totals, loading, onExport, onDeleteMovements, onRestoreM
         {voidTarget && <VoidCashModal count={voidTarget.count} bulk={voidTarget.bulk} mode={mode}
           onClose={() => setVoidTarget(null)}
           onConfirm={async reason => {
-            const ids = voidTarget.bulk ? [] : voidTarget.ids
+            const ids = voidTarget.scopeAll ? [] : voidTarget.ids
             setBusyIds(ids)
-            try { return await onDeleteMovements?.(ids, { bulk:voidTarget.bulk, mode, reason }) }
+            try { return await onDeleteMovements?.(ids, { bulk:voidTarget.scopeAll, mode, reason }) }
             finally { setBusyIds([]) }
           }} />}
       </AnimatePresence>
