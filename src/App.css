@@ -275,6 +275,7 @@
 .pn-notification-dismiss { position:static;width:25px;height:25px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;color:#888493;background:transparent;cursor:pointer;transition:color .16s,background .16s,border-color .16s; }
 .pn-notification-dismiss:hover,.pn-notification-dismiss:focus-visible { color:#fff;background:rgba(255,77,109,.16);border-color:rgba(255,77,109,.32);outline:none; }
 .pn-notification-item.is-today { border-color:rgba(255,194,71,.2);background:linear-gradient(110deg,rgba(255,194,71,.08),rgba(255,255,255,.02)); }
+.pn-notification-item.is-overdue { border-color:rgba(255,77,109,.24);background:linear-gradient(110deg,rgba(255,77,109,.09),rgba(255,255,255,.02)); }
 .pn-notification-item.is-soon { border-color:rgba(179,71,255,.18);background:linear-gradient(110deg,rgba(179,71,255,.075),rgba(255,255,255,.02)); }
 .pn-notification-icon { width:34px;height:34px;display:grid;place-items:center;flex:none;border-radius:11px;color:#ffd166;background:rgba(255,194,71,.1); }
 .is-soon .pn-notification-icon { color:#d3a4ff;background:rgba(179,71,255,.12); }

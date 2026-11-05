@@ -597,6 +597,16 @@ const HELP_CONTENT = {
       { heading: '¿Incluye también ventas a crédito?', text: 'Sí. Si tenés ambos módulos activos, la ruta unifica cuotas de préstamos en efectivo y de ventas en un solo lugar, con badges de color para distinguirlos.' },
     ],
   },
+  v_ruta: {
+    icon: Route,
+    title: 'Cobros — Ventas',
+    color: 'purple',
+    sections: [
+      { heading: '¿Qué muestra?', text: 'Las cuotas de ventas a crédito vencidas, las que vencen hoy y las próximas. Incluye clientes, referencia de venta y saldo pendiente.' },
+      { heading: '¿Cómo registrar un cobro?', text: 'Buscá al cliente y elegí Cobrar para pagar la cuota completa o Pago parcial para ingresar un importe. Abrir WhatsApp o llamar solo contacta al cliente; no registra el pago.' },
+      { heading: '¿Cuándo avisa?', text: 'La campanita reúne cuotas de Préstamos y Ventas que vencen hoy, dentro de dos días o que ya están vencidas. Los avisos del dispositivo requieren permiso del navegador.' },
+    ],
+  },
   p_clientes: {
     icon: Users,
     title: 'Clientes — Préstamos',
@@ -960,6 +970,7 @@ const NAV_VENTAS = [
   { id: 'v_inicio',   label: 'Inicio',           icon: LayoutDashboard },
   { id: 'v_catalogo', label: 'Catálogo',         icon: Package },
   { id: 'v_nueva',    label: 'Nueva venta',      icon: ShoppingCart },
+  { id: 'v_ruta',     label: 'Cobros',           icon: Route },
   { id: 'v_ventas',   label: 'Ventas',           icon: Store },
   { id: 'v_clientes', label: 'Clientes',         icon: Users },
   { id: 'v_papelera', label: 'Papelera',         icon: Trash2 },
@@ -1170,18 +1181,24 @@ export default function App() {
 
   const paymentReminders = useMemo(() => {
     const reference = localDateKey(new Date(reminderClock))
-    const pending = payments.filter(p => (p.origen ?? 'efectivo') === 'efectivo' &&
-      ['Pendiente','Vencido','Parcial'].includes(p.status) && [0, 2].includes(daysUntilDate(p.due, reference))
-    )
+    const pending = payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && p.due)
     return {
+      overdue: pending.filter(p => daysUntilDate(p.due, reference) < 0),
       today: pending.filter(p => daysUntilDate(p.due, reference) === 0),
       inTwoDays: pending.filter(p => daysUntilDate(p.due, reference) === 2),
     }
   }, [payments, reminderClock])
-  const reminderCount = paymentReminders.today.length + paymentReminders.inTwoDays.length
+  const reminderCountByOrigin = useMemo(() => {
+    const dueSoon = [...paymentReminders.overdue, ...paymentReminders.today, ...paymentReminders.inTwoDays]
+    return {
+      prestamos: dueSoon.filter(p => (p.origen ?? 'efectivo') === 'efectivo').length,
+      ventas: dueSoon.filter(p => p.origen === 'venta').length,
+    }
+  }, [paymentReminders])
   const reminderDate = localDateKey(new Date(reminderClock))
   const reminderReadKey = `pn-reminders-read-${user?.id || 'guest'}-${reminderDate}`
   const reminderEntries = useMemo(() => [
+    ...paymentReminders.overdue.map(payment => ({ payment, kind:'overdue', key:`overdue-${payment.id}` })),
     ...paymentReminders.today.map(payment => ({ payment, kind:'today', key:`today-${payment.id}` })),
     ...paymentReminders.inTwoDays.map(payment => ({ payment, kind:'soon', key:`soon-${payment.id}` })),
   ], [paymentReminders])
@@ -1249,10 +1266,15 @@ export default function App() {
   useEffect(() => {
     if (notificationPermission !== 'granted' || !user) return
     const date = localDateKey()
-    const groups = [
+    const categories = [
+      { key: 'overdue', title: 'Cuotas vencidas pendientes', items: paymentReminders.overdue },
       { key: 'today', title: 'Cobros para hoy', items: paymentReminders.today },
       { key: 'two-days', title: 'Cobros dentro de 2 días', items: paymentReminders.inTwoDays },
     ]
+    const groups = categories.flatMap(category => [
+      { ...category, key:`${category.key}-prestamos`, items:category.items.filter(p => (p.origen ?? 'efectivo') === 'efectivo') },
+      { ...category, key:`${category.key}-ventas`, title:`${category.title} · Ventas`, items:category.items.filter(p => p.origen === 'venta') },
+    ])
     let cancelled = false
     for (const group of groups) {
       if (!group.items.length) continue
@@ -1301,7 +1323,7 @@ export default function App() {
     try {
       const permission = await Notification.requestPermission()
       setNotificationPermission(permission)
-      if (permission === 'granted') showToast('Avisos activados para cuotas de hoy y de dentro de 2 días.')
+      if (permission === 'granted') showToast('Avisos activados para cuotas vencidas, de hoy y de dentro de 2 días.')
       else showToast('No se activaron los avisos. Podés habilitarlos desde los ajustes del navegador.', 'error')
     } catch {
       showToast('No se pudo activar el permiso de notificaciones.', 'error')
@@ -1851,7 +1873,7 @@ export default function App() {
   /* ── Selector de modo (primera pantalla tras login) ── */
   if (!modo) return <><ModeSelector onSelect={elegirModo} onOpenLegal={setLegalSection} performanceMode={performanceMode} onTogglePerformance={togglePerformanceMode}/>{legalSection && <LegalDialog key={legalSection} section={legalSection} onClose={() => setLegalSection(null)}/>}</>
 
-  const rutaCount    = reminderCount
+  const rutaCount    = modo === 'ventas' ? reminderCountByOrigin.ventas : reminderCountByOrigin.prestamos
 
   return (
     <MotionConfig reducedMotion={performanceMode ? 'always' : 'never'} skipAnimations={performanceMode} transition={performanceMode ? { skipAnimations: true } : undefined}>
@@ -1879,7 +1901,7 @@ export default function App() {
         </p>
         <nav className="side-nav">
           {(modo === 'prestamos' ? NAV_PRESTAMOS : NAV_VENTAS).map(({ id, label, icon: Icon }) => {
-            const badge = id === 'p_ruta' ? rutaCount : 0
+            const badge = (id === 'p_ruta' || id === 'v_ruta') ? rutaCount : 0
             return (
               <button key={id}
                 className={`nav-item nav-item-${modo} ${tab === id ? `selected selected-${modo}` : ''}`}
@@ -1959,6 +1981,7 @@ export default function App() {
               {tab === 'p_inicio'   && <PrestamosInicio totals={totals} loans={loansEfectivo} payments={paymentsEfectivo} monthBars={monthBars} loading={loading} go={setTab} onNew={() => setModal('loan')} onPay={requestPaymentConfirmation} />}
               {tab === 'p_nuevo'    && <LoanModal inline onClose={() => setTab('p_inicio')} onCreate={handleCreateLoan} userId={user?.id} />}
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} promises={paymentPromises} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} />}
+              {tab === 'v_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => p.origen === 'venta') : payments.filter(p => p.origen === 'venta')} promises={[]} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} module="ventas" />}
               {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onAdjustLoan={setAdjustLoanTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} userId={user.id} />}
@@ -1989,9 +2012,9 @@ export default function App() {
 
       {/* Modales */}
       <AnimatePresence>
-        {notificationsOpen && <NotificationsModal entries={visibleReminderEntries} permission={notificationPermission}
+        {notificationsOpen && <NotificationsModal entries={visibleReminderEntries} permission={notificationPermission} mode={modo}
           onEnable={enableNotifications} onDismiss={dismissReminder} onClose={() => setNotificationsOpen(false)}
-          onGoToRoute={() => { setNotificationsOpen(false); setModo('prestamos'); setTab('p_ruta'); try { localStorage.setItem('pn-modo','prestamos') } catch { /* La navegación sigue funcionando. */ } }}/>}
+          onGoToRoute={() => { setNotificationsOpen(false); const nextMode = modo === 'ventas' ? 'ventas' : 'prestamos'; setModo(nextMode); setTab(nextMode === 'ventas' ? 'v_ruta' : 'p_ruta'); try { localStorage.setItem('pn-modo',nextMode) } catch { /* La navegación sigue funcionando. */ } }}/>}
       </AnimatePresence>
       <AnimatePresence>
         {(modal === 'loan' || modal?.type === 'loan') && <LoanModal onClose={() => setModal(null)} onCreate={handleCreateLoan} userId={user?.id} prefill={modal?.prefill} />}
@@ -3890,7 +3913,7 @@ function PaymentPromiseModal({ payment, onClose, onConfirm }) {
   )
 }
 
-function NotificationsModal({ entries = [], permission, onEnable, onDismiss, onClose, onGoToRoute }) {
+function NotificationsModal({ entries = [], permission, mode = 'prestamos', onEnable, onDismiss, onClose, onGoToRoute }) {
   useEffect(() => {
     const onKeyDown = event => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKeyDown)
@@ -3907,21 +3930,21 @@ function NotificationsModal({ entries = [], permission, onEnable, onDismiss, onC
         </header>
         <div className="pn-notifications-list">
           {entries.length ? entries.map(({payment,kind,key}) => (
-            <article className={`pn-notification-item ${kind === 'today' ? 'is-today' : 'is-soon'}`} key={key}>
-              <span className="pn-notification-icon">{kind === 'today' ? <Bell size={15}/> : <Calendar size={15}/>}</span>
+            <article className={`pn-notification-item ${kind === 'overdue' ? 'is-overdue' : kind === 'today' ? 'is-today' : 'is-soon'}`} key={key}>
+              <span className="pn-notification-icon">{kind === 'overdue' || kind === 'today' ? <Bell size={15}/> : <Calendar size={15}/>}</span>
               <div className="pn-notification-copy">
-                <b>{kind === 'today' ? 'Cuota para cobrar hoy' : 'Cuota próxima a vencer'}</b>
+                <b>{kind === 'overdue' ? 'Cuota vencida pendiente' : kind === 'today' ? 'Cuota para cobrar hoy' : 'Cuota próxima a vencer'}</b>
                 <span>{payment.client} · Cuota {payment.n}/{payment.totalQuotas || '—'}</span>
-                <small>{kind === 'today' ? 'Vence hoy' : 'Vence en 2 días'} · {payment.due ? new Date(`${payment.due}T12:00:00`).toLocaleDateString('es-AR',{day:'numeric',month:'short'}) : 'Fecha no disponible'}</small>
+                <small>{payment.origen === 'venta' ? 'Venta' : 'Préstamo'} · {kind === 'overdue' ? `Vencía el ${payment.due ? new Date(`${payment.due}T12:00:00`).toLocaleDateString('es-AR',{day:'numeric',month:'short'}) : '—'}` : kind === 'today' ? 'Vence hoy' : 'Vence en 2 días'}</small>
               </div>
               <strong>{fmt(payment.amount)}</strong>
               <button type="button" className="pn-notification-dismiss" onClick={() => onDismiss?.(key)}
                 aria-label={`Quitar aviso de ${payment.client}`} title="Quitar aviso"><X size={14}/></button>
             </article>
-          )) : <div className="pn-notifications-empty"><span><CheckCheck size={23}/></span><b>Estás al día</b><p>No hay cuotas que venzan hoy ni dentro de dos días.</p></div>}
+          )) : <div className="pn-notifications-empty"><span><CheckCheck size={23}/></span><b>Estás al día</b><p>No hay cuotas vencidas, para hoy ni dentro de dos días.</p></div>}
         </div>
         <footer className="pn-notifications-footer">
-          <button type="button" className="pn-btn-outline pn-btn-sm" onClick={onGoToRoute}><Route size={13}/> Ir a Ruta de Cobro</button>
+          <button type="button" className="pn-btn-outline pn-btn-sm" onClick={onGoToRoute}><Route size={13}/> Ir a cobros de {mode === 'ventas' ? 'ventas' : 'préstamos'}</button>
           {permission === 'granted'
             ? <span className="pn-notifications-enabled"><Check size={13}/> Avisos activados</span>
             : permission === 'unsupported'
@@ -3988,7 +4011,7 @@ function EditClientModal({ client, onClose, onSave }) {
 /* ═══════════════════════════════════════════════════════════════
    RUTA DIA — ruta de cobro del día
 ═══════════════════════════════════════════════════════════════ */
-function RutaDia({ payments = [], promises = [], loading = false, onPay, onPartial, onPromise }) {
+function RutaDia({ payments = [], promises = [], loading = false, onPay, onPartial, onPromise, module = 'prestamos' }) {
   const [filtro, setFiltro] = useState('Urgentes')
   const [q, setQ] = useState('')
   const cobros = useMemo(() => {
@@ -4023,11 +4046,11 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
       <div className="pn-section-header">
         <div>
           <div className="pn-eyebrow"><Route size={11}/> COBROS DEL DÍA</div>
-          <div className="pn-heading-with-help"><h2 className="pn-section-title">Ruta de Cobro</h2><HelpBtn contentKey="p_ruta" /></div>
+          <div className="pn-heading-with-help"><h2 className="pn-section-title">{module === 'ventas' ? 'Cobros de ventas' : 'Ruta de Cobro'}</h2><HelpBtn contentKey={module === 'ventas' ? 'v_ruta' : 'p_ruta'} /></div>
           <p className="pn-section-desc">
             {cobros.length > 0
-              ? <>{cobros.length} cobro{cobros.length!==1?'s':''} · <span className="text-green">{fmt(totalPendiente)}</span> pendiente</>
-              : '0 cobros pendientes para hoy'}
+              ? <>{cobros.length} cuota{cobros.length!==1?'s':''} · <span className="text-green">{fmt(totalPendiente)}</span> pendiente{module === 'ventas' ? ' en ventas' : ''}</>
+              : module === 'ventas' ? 'No hay cuotas de ventas pendientes para estos filtros' : '0 cobros pendientes para hoy'}
           </p>
         </div>
       </div>
@@ -4038,24 +4061,24 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
         <div><small>Saldo en esta vista</small><b><Money value={totalPendiente}/></b></div>
         <div><small>Cuotas para cobrar hoy</small><b className="text-amber">{cuotasHoy}</b></div>
         <div><small>Vencen en 2 días</small><b className="text-purple">{payments.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && daysUntil(p.due) === 2).length}</b></div>
-        <div><small>Promesas para hoy</small><b className="text-purple">{promesasHoy}</b></div>
-        <div><small>Promesas atrasadas</small><b className={promesasAtrasadas ? 'text-red' : 'text-green'}>{promesasAtrasadas}</b></div>
+        {module === 'prestamos' && <><div><small>Promesas para hoy</small><b className="text-purple">{promesasHoy}</b></div>
+        <div><small>Promesas atrasadas</small><b className={promesasAtrasadas ? 'text-red' : 'text-green'}>{promesasAtrasadas}</b></div></>}
       </div>
       <div className="pn-toolbar pn-ruta-toolbar">
         <label className="pn-searchbox"><Search size={14}/><input placeholder="Buscar cliente, teléfono o préstamo…" value={q} onChange={e => setQ(e.target.value)}/></label>
-        <div className="pn-filter-pills">{['Urgentes','Todo','Vencidas','7+ días','30+ días','Hoy'].map(f => <button key={f} className={`pn-pill ${filtro===f?'pn-pill-active-green':''}`} onClick={() => setFiltro(f)}>{f}</button>)}</div>
+        <div className="pn-filter-pills">{['Urgentes','Todo','Vencidas','7+ días','30+ días','Hoy'].map(f => <button key={f} className={`pn-pill ${filtro===f?(module === 'ventas'?'pn-pill-active-purple':'pn-pill-active'):''}`} onClick={() => setFiltro(f)}>{f}</button>)}</div>
       </div>
 
       {loading ? (
         <div className="pn-ruta-list">{[1,2,3].map(i=><div key={i} className="pn-ruta-sk"/>)}</div>
       ) : cobros.length === 0 ? (
         <motion.div className="pn-empty" initial={{ opacity:0, scale:.95 }} animate={{ opacity:1, scale:1 }}>
-          <motion.div className="pn-empty-icon pn-empty-icon-green"
+          <motion.div className={`pn-empty-icon ${module === 'ventas' ? 'pn-empty-icon-purple' : 'pn-empty-icon-green'}`}
             animate={{ scale:[1,1.08,1] }} transition={{ duration:2.5, repeat:Infinity }}>
             <CheckCheck size={30}/>
           </motion.div>
           <h3>¡Todo al día!</h3>
-          <p>{filtro === 'Urgentes' ? 'No hay cuotas vencidas, de hoy o de los próximos 7 días.' : 'No hay cuotas para este filtro.'}</p>
+          <p>{filtro === 'Urgentes' ? `No hay cuotas vencidas, de hoy o de los próximos 7 días${module === 'ventas' ? ' en ventas' : ''}.` : 'No hay cuotas para este filtro.'}</p>
         </motion.div>
       ) : (
         <div className="pn-ruta-list">
@@ -4081,7 +4104,8 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
                     <div>
                       <h3 className="pn-ruta-client">{p.client}</h3>
                       <div className="pn-ruta-meta">
-                        <span className="mono">{p.loanId}</span>
+                        <span className="mono">{module === 'ventas' ? (p.ventaRef || p.loanId) : p.loanId}</span>
+                        {module === 'ventas' && p.productoLabel && <><span>·</span><span>{p.productoLabel}</span></>}
                         <span>·</span>
                         <span>Cuota {p.n}/{p.totalQuotas}</span>
                         <span>·</span>
@@ -4094,7 +4118,7 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
                             : <span className="pn-badge-dim">{dias === 1 ? 'Mañana' : `En ${dias} días`}</span>
                         }
                         {(p.partiallyPaid || p.status === 'Parcial') && <span className="pn-badge-purple">Ya abonó parte</span>}
-                        {promesa && <span className={`pn-promise-badge ${promesa.fecha < today ? 'is-late' : ''}`}><Calendar size={10}/> Prometió {new Date(`${promesa.fecha}T12:00:00`).toLocaleDateString('es-AR')}</span>}
+                        {module === 'prestamos' && promesa && <span className={`pn-promise-badge ${promesa.fecha < today ? 'is-late' : ''}`}><Calendar size={10}/> Prometió {new Date(`${promesa.fecha}T12:00:00`).toLocaleDateString('es-AR')}</span>}
                       </div>
                     </div>
                   </div>
@@ -4121,7 +4145,7 @@ function RutaDia({ payments = [], promises = [], loading = false, onPay, onParti
                   <button className="pn-btn-partial" onClick={() => onPartial(p)} title="Pago parcial">
                     <MoreHorizontal size={14}/>
                   </button>
-                  <button type="button" className="pn-btn-icon pn-promise-action" onClick={() => onPromise(p)} title="Registrar promesa de pago" aria-label="Registrar promesa de pago"><Calendar size={14}/></button>
+                  {module === 'prestamos' && <button type="button" className="pn-btn-icon pn-promise-action" onClick={() => onPromise(p)} title="Registrar promesa de pago" aria-label="Registrar promesa de pago"><Calendar size={14}/></button>}
                   <motion.button className="pn-btn-cobrar"
                     onClick={() => onPay(p, 'Pagado')}
                     whileHover={{ scale:1.05 }} whileTap={{ scale:.95 }}>
@@ -6093,6 +6117,7 @@ function VentasInicio({ ventas = [], payments = [], loans = [], productos = [], 
   const quick = [
     { label:'Nueva venta',icon:ShoppingCart,tab:'v_nueva',   desc:'Registrar venta' },
     { label:'Catálogo',   icon:Package,     tab:'v_catalogo',desc:'Ver productos'   },
+    { label:'Cobros',     icon:Route,       tab:'v_ruta',    desc:`${cuotasVenta.filter(p => ['Pendiente','Vencido','Parcial'].includes(p.status) && (daysUntil(p.due) <= 0 || daysUntil(p.due) === 2)).length} para atender` },
     { label:'Ventas',     icon:Store,       tab:'v_ventas',  desc:`${ventas.length} total` },
     { label:'Clientes',   icon:Users,       tab:'v_clientes',desc:'Fichas'          },
   ]
