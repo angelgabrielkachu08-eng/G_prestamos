@@ -1202,6 +1202,9 @@ export default function App() {
     ...paymentReminders.today.map(payment => ({ payment, kind:'today', key:`today-${payment.id}` })),
     ...paymentReminders.inTwoDays.map(payment => ({ payment, kind:'soon', key:`soon-${payment.id}` })),
   ], [paymentReminders])
+  const activeModuleReminderEntries = useMemo(() => reminderEntries.filter(({ payment }) =>
+    modo === 'ventas' ? payment.origen === 'venta' : (payment.origen ?? 'efectivo') === 'efectivo'
+  ), [reminderEntries, modo])
   const [readReminderState, setReadReminderState] = useState(() => ({
     key: reminderReadKey, keys: readReminderStorage(reminderReadKey),
   }))
@@ -1215,7 +1218,7 @@ export default function App() {
     dismissedReminderState.date === reminderDate ? dismissedReminderState.keys : [],
     [dismissedReminderState, reminderDate]
   )
-  const visibleReminderEntries = reminderEntries.filter(item => !dismissedReminderKeys.includes(item.key))
+  const visibleReminderEntries = activeModuleReminderEntries.filter(item => !dismissedReminderKeys.includes(item.key))
   const unreadReminderCount = visibleReminderEntries.filter(item => !readReminderKeys.includes(item.key)).length
   const markRemindersRead = useCallback(() => {
     const keys = visibleReminderEntries.map(item => item.key)
@@ -1271,10 +1274,13 @@ export default function App() {
       { key: 'today', title: 'Cobros para hoy', items: paymentReminders.today },
       { key: 'two-days', title: 'Cobros dentro de 2 días', items: paymentReminders.inTwoDays },
     ]
-    const groups = categories.flatMap(category => [
-      { ...category, key:`${category.key}-prestamos`, items:category.items.filter(p => (p.origen ?? 'efectivo') === 'efectivo') },
-      { ...category, key:`${category.key}-ventas`, title:`${category.title} · Ventas`, items:category.items.filter(p => p.origen === 'venta') },
-    ])
+    const isSales = modo === 'ventas'
+    const groups = categories.map(category => ({
+      ...category,
+      key:`${category.key}-${isSales ? 'ventas' : 'prestamos'}`,
+      title:isSales ? `${category.title} · Ventas` : category.title,
+      items:category.items.filter(p => isSales ? p.origen === 'venta' : (p.origen ?? 'efectivo') === 'efectivo'),
+    }))
     let cancelled = false
     for (const group of groups) {
       if (!group.items.length) continue
@@ -1295,7 +1301,7 @@ export default function App() {
       notify()
     }
     return () => { cancelled = true }
-  }, [notificationPermission, user, paymentReminders])
+  }, [notificationPermission, user, paymentReminders, modo])
 
   useEffect(() => {
     performanceModeActive = performanceMode
