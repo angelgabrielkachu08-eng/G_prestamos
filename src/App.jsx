@@ -5791,21 +5791,34 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                       </div>
                     )
                   })}
-                  {receipts.some(r => r.loanId === loanId) && (
-                    <details className="pn-payment-history">
-                      <summary><History size={13}/> Historial de pagos ({receipts.filter(r => r.loanId === loanId).length})</summary>
-                      <div className="pn-payment-history-list">
-                        {receipts.filter(r => r.loanId === loanId).sort((a,b) => String(b.paidAt || '').localeCompare(String(a.paidAt || ''))).map(r => (
-                          <div className="pn-payment-history-row" key={r.dbId || r.id}>
-                            <span><b>Cuota {r.n ?? '—'}</b><small>{r.paidAt ? new Date(r.paidAt).toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' }) : 'Fecha sin dato'} · {r.method || 'Efectivo'} · {r.id}</small></span>
-                            <strong className="text-green"><Money value={r.amount}/></strong>
-                            <button type="button" className="pn-btn-outline pn-btn-sm" onClick={() => onReceiptPdf?.(r)}><FileText size={12}/> PDF</button>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
                 </div>
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* El historial permanece visible aunque ya no existan cuotas pendientes. */}
+        {cl.length > 0 && (
+          <div className="pn-panel">
+            <div className="pn-panel-header">
+              <span className="pn-panel-title"><History size={14}/> Comprobantes de cuotas pagadas</span>
+            </div>
+            <div style={{ padding:'8px 14px 14px', display:'flex', flexDirection:'column', gap:8 }}>
+              {cl.map(loan => {
+                const loanReceipts = receipts.filter(r => r.loanId === loan.id).sort((a,b) => String(b.paidAt || '').localeCompare(String(a.paidAt || '')))
+                return <details className="pn-payment-history" key={`receipts-${loan.id}`}>
+                  <summary><History size={13}/> {loan.id} · {loanReceipts.length} pago{loanReceipts.length === 1 ? '' : 's'} registrado{loanReceipts.length === 1 ? '' : 's'}</summary>
+                  {loanReceipts.length > 0 ? (
+                    <div className="pn-payment-history-list">
+                      {loanReceipts.map(r => (
+                        <div className="pn-payment-history-row" key={r.dbId || r.id}>
+                          <span><b>Cuota {r.n ?? '—'} · <Money value={r.amount}/></b><small>{r.paidAt ? new Date(r.paidAt).toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' }) : 'Fecha sin dato'} · {r.method || 'Efectivo'} · {r.id}</small></span>
+                          <button type="button" className="pn-btn-outline pn-btn-sm" onClick={() => onReceiptPdf?.(r)}><FileText size={12}/> Descargar PDF</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p style={{ margin:'10px 0 2px', color:'var(--pn-muted)', fontSize:12 }}>Todavía no hay pagos registrados para este préstamo.</p>}
+                </details>
               })}
             </div>
           </div>
