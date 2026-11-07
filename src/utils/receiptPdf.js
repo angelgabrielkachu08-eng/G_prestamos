@@ -292,7 +292,9 @@ export function exportInstallmentReceiptPdf(payment) {
   const width = 80
   const items = Array.isArray(payment.items) ? payment.items : []
   const itemLines = items.reduce((sum, item) => sum + Math.max(1, Math.ceil(String(item.nombre ?? item.name ?? 'Producto').length / 30)), 0)
-  const height = Math.max(112, 108 + itemLines * 4)
+  // Deja margen suficiente para que los productos y el cierre nunca salten
+  // a una segunda hoja al imprimir desde el navegador.
+  const height = Math.max(170, 155 + itemLines * 6)
   const doc = new jsPDF({ unit: 'mm', format: [width, height], orientation: 'portrait' })
   const pad = 6
   let y = 9
@@ -338,7 +340,6 @@ export function exportInstallmentReceiptPdf(payment) {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.setTextColor(20, 150, 91)
   doc.text(money(payment.amount), width / 2, y, { align: 'center' }); y += 7
   line('Resta de esta cuota', money(payment.remainingQuota ?? 0), { bold: true })
-  line('Saldo restante de la operación', money(payment.remainingCredit ?? 0), { bold: true })
   y += 2; separator()
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110, 114, 122)
   doc.text('Conserve este comprobante.', width / 2, y, { align: 'center' })
