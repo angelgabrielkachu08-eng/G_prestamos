@@ -338,7 +338,7 @@ export function exportInstallmentReceiptPdf(payment) {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.setTextColor(20, 150, 91)
   doc.text(money(payment.amount), width / 2, y, { align: 'center' }); y += 7
   line('Resta de esta cuota', money(payment.remainingQuota ?? 0), { bold: true })
-  line('Deuda pendiente', money(payment.remainingCredit ?? 0), { bold: true })
+  line('Saldo restante de la operación', money(payment.remainingCredit ?? 0), { bold: true })
   y += 2; separator()
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110, 114, 122)
   doc.text('Conserve este comprobante.', width / 2, y, { align: 'center' })
