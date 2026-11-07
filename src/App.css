@@ -6445,6 +6445,8 @@ html[data-performance-mode="on"] .lv2-root::after { display:none!important; }
 
 /* Cobros de préstamos: confirmación, contexto de mora e historial por cuota */
 .pn-payment-confirm { width:min(480px,calc(100vw - 28px)); }
+.pn-payment-confirm .modal-footer { flex-wrap:wrap; }
+.pn-payment-confirm .modal-footer > button:last-child { flex:1 1 100%; }
 .pn-payment-confirm-icon { display:grid;width:34px;height:34px;place-items:center;border-radius:11px;background:rgba(0,255,135,.1);color:var(--pn-green); }
 .pn-payment-confirm .modal-body > p { margin:0 0 14px;color:var(--pn-muted);font-size:13px;line-height:1.55; }
 .pn-payment-confirm-summary { display:flex;flex-direction:column;gap:7px;padding:15px;border:1px solid rgba(0,255,135,.18);border-radius:14px;background:linear-gradient(120deg,rgba(0,255,135,.06),rgba(179,71,255,.06)); }
@@ -6474,6 +6476,7 @@ html[data-performance-mode="on"] .lv2-root::after { display:none!important; }
   .pn-ruta-toolbar .pn-searchbox { flex-basis:100%;max-width:none; }
   .pn-ruta-toolbar .pn-filter-pills { width:100%; }
   .pn-payment-confirm-summary > b { font-size:21px; }
+  .pn-payment-confirm .modal-footer > button { min-width:0;padding-inline:10px;font-size:12px; }
   .pn-payment-history { margin-right:0;margin-left:0; }
 }
 @media(hover:none) and (max-width:640px) {

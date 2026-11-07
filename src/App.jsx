@@ -1467,7 +1467,7 @@ export default function App() {
     } catch (e) { showToast(e.message, 'error') }
   }
 
-  const handlePay = async (payment, status, amount = payment.amount) => {
+  const handlePay = async (payment, status, amount = payment.amount, generateReceipt = false) => {
     if (!user) { showToast('Debes iniciar sesión', 'error'); return false }
     if (status !== 'Pagado' && status !== 'Parcial') return false
     const importeNum = Number(amount)
@@ -1485,7 +1485,12 @@ export default function App() {
         const statusRestante = daysUntil(p.due) < 0 ? 'Vencido' : 'Parcial'
         return { ...p, status:statusRestante, partiallyPaid:true, paidAmount:Number(p.paidAmount || 0) + importeNum, amount:Math.max(0, Number(p.amount) - importeNum) }
       }).filter(Boolean))
-      setReceipts((prev) => [{ id: pago.referencia, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt: new Date().toISOString(), status: 'Pagado', n: payment.n, method: 'efectivo', origen: payment.origen ?? 'efectivo' }, ...prev])
+      const paidAt = pago.recibido_at || new Date().toISOString()
+      const remainingQuota = Math.max(0, Number(payment.amount) - importeNum)
+      const remainingCredit = Math.max(0, payments.filter(p => p.loanId === payment.loanId && p.id !== payment.id && ['Pendiente','Vencido','Parcial'].includes(p.status)).reduce((sum, p) => sum + Number(p.amount || 0), 0) + remainingQuota)
+      const sale = (payment.origen ?? 'efectivo') === 'venta' ? ventas.find(v => v.prestamo?.referencia === payment.loanId) : null
+      const receipt = { id: pago.referencia, dbId: pago.id, cuotaId: payment.id, loanId: payment.loanId, client: payment.client, phone: payment.phone, amount: importeNum, capital: pago.capital, interest: pago.interes, due: payment.due, paidAt, status: 'Pagado', n: payment.n, totalQuotas: payment.totalQuotas, method: 'Efectivo', origen: payment.origen ?? 'efectivo', originalAmount: payment.originalAmount ?? payment.amount, remainingQuota, remainingCredit, saleReference: sale?.referencia, items: sale?.items ?? [] }
+      setReceipts((prev) => [receipt, ...prev])
       setLedger((prev) => [{ id: pago.movimientoCajaId ?? pago.referencia, label: `Cobro · ${payment.client}`, type: 'Entrada', amount: importeNum, time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), rawDate: new Date().toISOString(), origen: (payment.origen ?? 'efectivo') }, ...prev])
       const paidIncrement = finalStatus === 'Pagado' ? 1 : 0
       if (paidIncrement) setPaymentPromises(prev => prev.map(item => item.cuotaId === payment.id && item.estado === 'pendiente' ? { ...item, estado:'cumplida' } : item))
@@ -1502,9 +1507,26 @@ export default function App() {
       setLoans((prev) => prev.map(advanceLoan))
       setAllLoans((prev) => prev.map(advanceLoan))
       showToast(finalStatus === 'Pagado' ? `✓ Pago registrado · Recibo ${pago.referencia}` : 'Pago parcial registrado')
+      if (generateReceipt) {
+        try {
+          const { exportInstallmentReceiptPdf } = await import('./utils/receiptPdf')
+          exportInstallmentReceiptPdf(receipt)
+        } catch (pdfError) {
+          showToast(`El pago quedó registrado, pero no se pudo generar el PDF: ${pdfError.message}`, 'error')
+        }
+      }
       return true
     } catch (err) { showToast(`No se pudo registrar: ${err.message}`, 'error'); return false }
     finally { paymentLocks.current.delete(payment.id) }
+  }
+
+  const handleDownloadPaymentReceipt = async (receipt) => {
+    try {
+      const sale = receipt.origen === 'venta' ? ventas.find(v => v.prestamo?.referencia === receipt.loanId) : null
+      const { exportInstallmentReceiptPdf } = await import('./utils/receiptPdf')
+      exportInstallmentReceiptPdf({ ...receipt, saleReference: receipt.saleReference || sale?.referencia, items: receipt.items?.length ? receipt.items : (sale?.items ?? []) })
+      showToast('Comprobante PDF descargado')
+    } catch (err) { showToast(`No se pudo generar el comprobante: ${err.message}`, 'error') }
   }
 
   const requestPaymentConfirmation = (payment) => {
@@ -1988,7 +2010,7 @@ export default function App() {
               {tab === 'p_nuevo'    && <LoanModal inline onClose={() => setTab('p_inicio')} onCreate={handleCreateLoan} userId={user?.id} />}
               {tab === 'p_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => (p.origen ?? 'efectivo') === 'efectivo') : paymentsEfectivo} promises={paymentPromises} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} />}
               {tab === 'v_ruta'     && <RutaDia payments={rutaUnificada.length ? rutaUnificada.filter(p => p.origen === 'venta') : payments.filter(p => p.origen === 'venta')} promises={[]} loading={loading} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} module="ventas" />}
-              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onAdjustLoan={setAdjustLoanTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
+              {tab === 'p_clientes' && <ClientesPrestamos loans={loansEfectivo} allLoans={allLoansEfectivo} loading={loading} onNew={(opts) => setModal(opts?.prefill ? { type:'loan', prefill:opts.prefill } : 'loan')} onEdit={setEditTarget} onAdjustLoan={setAdjustLoanTarget} onArchivar={handleArchivarCliente} onComprobanteDocx={handleExportComprobanteDocx} onExportClient={(c) => handleExportClienteActivo(c, 'prestamos')} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onPromise={setPromiseTarget} onReceiptPdf={handleDownloadPaymentReceipt} payments={paymentsEfectivo} receipts={receiptsEfectivo} promises={paymentPromises} />}
               {tab === 'p_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'p_caja'     && <Cash ledger={ledgerEfectivo} totals={totals} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="prestamos" payments={paymentsEfectivo} userId={user.id} />}
 
@@ -1996,8 +2018,8 @@ export default function App() {
               {tab === 'v_inicio'   && <VentasInicio ventas={ventas} payments={payments} loans={allLoans} productos={productos} totals={totalsVentas} loading={loading} go={setTab} />}
       {tab === 'v_catalogo' && <Catalogo productos={productos} movimientosStock={movimientosStock} stockHistoryError={stockHistoryError} loading={loading} onCreate={handleCreateProduct} onUpdate={handleUpdateProduct} onDelete={handleDeleteProduct} onStockMovement={handleStockMovement} />}
               {tab === 'v_nueva'    && <NuevaVenta productos={productos} onSubmit={handleCreateVenta} />}
-              {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onExportSale={handleExportVentaDocx} onReport={() => setExportOpen(true)} />}
-              {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} loading={loading} go={setTab} onPay={handlePay} onPartial={setPartialTarget} onArchive={handleArchivarCliente} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
+              {tab === 'v_ventas'   && <VentasClientes ventas={ventas} payments={payments} loans={allLoans} receipts={receipts} loading={loading} go={setTab} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onReceiptPdf={handleDownloadPaymentReceipt} onExportSale={handleExportVentaDocx} onReport={() => setExportOpen(true)} />}
+              {tab === 'v_clientes' && <ClientesVentas ventas={ventas} payments={payments} loans={allLoans} receipts={receipts} loading={loading} go={setTab} onPay={requestPaymentConfirmation} onPartial={setPartialTarget} onReceiptPdf={handleDownloadPaymentReceipt} onArchive={handleArchivarCliente} onExportSale={handleExportVentaDocx} onExportClient={(c) => handleExportClienteActivo(c, 'ventas')} />}
               {tab === 'v_papelera' && <PapeleraClientes papelera={papelera} onRestaurar={handleRestaurarCliente} onEliminar={handleEliminarClientePermanente} onExport={handleExportFichaCliente} />}
               {tab === 'v_caja'     && <Cash ledger={ledgerVentas} totals={totalsVentas} loading={loading} onExport={() => setExportOpen(true)} onDeleteMovements={handleDeleteCashMovements} onRestoreMovement={handleRestoreCashMovement} mode="ventas" ventas={ventas} payments={payments.filter(p => p.origen === 'venta')} userId={user.id} />}
 
@@ -2049,15 +2071,15 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {partialTarget && <PartialModal payment={partialTarget} onClose={() => setPartialTarget(null)} onConfirm={async (amt) => {
-          const saved = await handlePay(partialTarget, 'Parcial', amt)
+        {partialTarget && <PartialModal payment={partialTarget} onClose={() => setPartialTarget(null)} onConfirm={async (amt, generateReceipt) => {
+          const saved = await handlePay(partialTarget, 'Parcial', amt, generateReceipt)
           if (saved) setPartialTarget(null)
           return saved
         }} />}
       </AnimatePresence>
       <AnimatePresence>
-        {paymentConfirmTarget && <PaymentConfirmModal payment={paymentConfirmTarget} onClose={() => setPaymentConfirmTarget(null)} onConfirm={async () => {
-          const saved = await handlePay(paymentConfirmTarget, 'Pagado')
+        {paymentConfirmTarget && <PaymentConfirmModal payment={paymentConfirmTarget} onClose={() => setPaymentConfirmTarget(null)} onConfirm={async (generateReceipt) => {
+          const saved = await handlePay(paymentConfirmTarget, 'Pagado', paymentConfirmTarget.amount, generateReceipt)
           if (saved) setPaymentConfirmTarget(null)
           return saved
         }} />}
@@ -3824,11 +3846,11 @@ function PartialModal({ payment, onClose, onConfirm }) {
   const [saving, setSaving] = useState(false)
   const max = Number(payment?.amount || 0)
 
-  async function handleConfirm() {
+  async function handleConfirm(generateReceipt = false) {
     const v = Number(amount)
     if (!v || v <= 0 || v > max) return
     setSaving(true)
-    try { await onConfirm(Number(amount)) } finally { setSaving(false) }
+    try { await onConfirm(Number(amount), generateReceipt) } finally { setSaving(false) }
   }
 
   return createPortal(
@@ -3860,10 +3882,11 @@ function PartialModal({ payment, onClose, onConfirm }) {
         </div>
         <div className="modal-footer">
           <button type="button" className="secondary-button" onClick={onClose}>Cancelar</button>
-          <button type="button" className="primary-button" onClick={handleConfirm}
+          <button type="button" className="secondary-button" onClick={() => handleConfirm(false)}
             disabled={saving || !amount || Number(amount) <= 0 || Number(amount) > max}>
-            {saving ? <Spinner size={14}/> : <Check size={14}/>} Confirmar
+            {saving ? <Spinner size={14}/> : <Check size={14}/>} Cobrar sin comprobante
           </button>
+          <button type="button" className="primary-button" onClick={() => handleConfirm(true)} disabled={saving || !amount || Number(amount) <= 0 || Number(amount) > max}><FileText size={14}/> Cobrar y generar PDF</button>
         </div>
       </motion.div>
     </motion.div>,
@@ -3873,9 +3896,9 @@ function PartialModal({ payment, onClose, onConfirm }) {
 
 function PaymentConfirmModal({ payment, onClose, onConfirm }) {
   const [saving, setSaving] = useState(false)
-  async function confirm() {
+  async function confirm(generateReceipt = false) {
     setSaving(true)
-    try { await onConfirm() } finally { setSaving(false) }
+    try { await onConfirm(generateReceipt) } finally { setSaving(false) }
   }
   return createPortal(
     <motion.div className="modal-backdrop" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onClick={e => e.target === e.currentTarget && !saving && onClose()}>
@@ -3885,7 +3908,7 @@ function PaymentConfirmModal({ payment, onClose, onConfirm }) {
           <p>Vas a registrar el pago completo de esta cuota. El saldo y la caja se actualizarán juntos.</p>
           <div className="pn-payment-confirm-summary"><span>{payment.client}</span><small>{payment.loanId} · Cuota {payment.n}/{payment.totalQuotas || '—'} · Vence {payment.due || '—'}</small><b><Money value={payment.amount}/></b>{payment.partiallyPaid && <small>Incluye pagos parciales anteriores; este es el saldo restante.</small>}</div>
         </div>
-        <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Volver</button><button type="button" className="primary-button" onClick={confirm} disabled={saving}>{saving?<Spinner size={14}/>:<Check size={14}/>} Registrar cobro</button></div>
+        <div className="modal-footer"><button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Volver</button><button type="button" className="secondary-button" onClick={() => confirm(false)} disabled={saving}>{saving?<Spinner size={14}/>:<Check size={14}/>} Cobrar sin comprobante</button><button type="button" className="primary-button" onClick={() => confirm(true)} disabled={saving}><FileText size={14}/> Cobrar y generar PDF</button></div>
       </motion.div>
     </motion.div>, document.body
   )
@@ -4774,7 +4797,7 @@ function NuevaVenta({ productos = [], onSubmit }) {
 /* ═══════════════════════════════════════════════════════════════
    VENTA ACORDEON
 ═══════════════════════════════════════════════════════════════ */
-function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExportSale }) {
+function VentaAcordeon({ venta, cuotas = [], loans = [], receipts = [], onPay, onPartial, onReceiptPdf, onExportSale }) {
   const [open, setOpen] = useState(false)
   const [expandedQuota, setExpandedQuota] = useState(null)
 
@@ -4845,6 +4868,20 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
               <button type="button" className="vc-export-btn" onClick={() => onExportSale?.(venta)}><FileText size={14}/> Descargar comprobante Word de esta compra</button>
             </div>
 
+            {receipts.filter(r => r.loanId === venta.prestamo?.referencia).length > 0 && (
+              <details className="pn-payment-history" open>
+                <summary><History size={13}/> Cuotas pagadas · comprobantes ({receipts.filter(r => r.loanId === venta.prestamo?.referencia).length})</summary>
+                <div className="pn-payment-history-list">
+                  {receipts.filter(r => r.loanId === venta.prestamo?.referencia).sort((a,b) => String(b.paidAt || '').localeCompare(String(a.paidAt || ''))).map(r => (
+                    <div className="pn-payment-history-row" key={r.dbId || r.id}>
+                      <span><b>Cuota {r.n ?? '—'} · {fmt(r.amount)}</b><small>{r.paidAt ? new Date(r.paidAt).toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' }) : 'Fecha sin dato'}{r.items?.length ? ` · ${r.items.map(item => item.nombre ?? item.name).join(', ')}` : ''}</small></span>
+                      <button type="button" className="pn-btn-outline pn-btn-sm" onClick={() => onReceiptPdf?.(r)}><FileText size={12}/> PDF</button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {pendientes.length > 0 ? (
               <div className="vc-cuotas-section">
                 <div className="vc-cuotas-titulo"><HandCoins size={13}/> Cuotas pendientes</div>
@@ -4871,9 +4908,7 @@ function VentaAcordeon({ venta, cuotas = [], loans = [], onPay, onPartial, onExp
                       </button>
                       {expandedQuota === p.id && (
                         <div id={`venta-quota-actions-${p.id}`} className="vc-cuota-actions-panel">
-                          <button type="button" className="vc-cobrar-btn" onClick={() => {
-                            if (window.confirm(`¿Confirmás el cobro de ${fmt(p.amount)} de la cuota ${p.n}? La ficha abierta no cobra cuotas.`)) onPay?.(p, 'Pagado')
-                          }}><Check size={14}/> Cobrar completa</button>
+                          <button type="button" className="vc-cobrar-btn" onClick={() => onPay?.(p, 'Pagado')}><Check size={14}/> Cobrar completa</button>
                           <button type="button" className="vc-parcial-btn" onClick={() => onPartial?.(p)}><HandCoins size={14}/> Cobrar por partes</button>
                           {sanitizePhone(p.phone || venta.phone) ? (
                             <a className="vc-whatsapp-btn" href={`https://wa.me/${sanitizePhone(p.phone || venta.phone)}?text=${encodeURIComponent(`Hola ${(p.client || venta.client || 'cliente').split(' ')[0]}, te recordamos que la cuota ${p.n} de tu compra ${venta.referencia} vence el ${p.due ? new Date(`${p.due}T12:00:00`).toLocaleDateString('es-AR') : 'próximamente'}. Importe pendiente: $${Number(p.amount || 0).toLocaleString('es-AR')}. Si ya abonaste, podés ignorar este mensaje.`)}`} target="_blank" rel="noreferrer"><MessageCircle size={14}/> Avisar por WhatsApp</a>
@@ -4914,7 +4949,7 @@ function estadoVenta(venta, payments, loans) {
   return 'Activo'
 }
 
-function VentasClientes({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onExportSale, onReport }) {
+function VentasClientes({ ventas = [], payments = [], loans = [], receipts = [], loading = false, go, onPay, onPartial, onReceiptPdf, onExportSale, onReport }) {
   const [q,      setQ]      = useState('')
   const [filtro, setFiltro] = useState('Todos')
   const [desde, setDesde] = useState('')
@@ -5020,7 +5055,7 @@ function VentasClientes({ ventas = [], payments = [], loans = [], loading = fals
                   </div>
                 </div>
                 <div className="vc-ventas-del-cliente">
-                  {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} loans={loans} onPay={onPay} onPartial={onPartial} onExportSale={onExportSale}/>)}
+                  {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} loans={loans} receipts={receipts} onPay={onPay} onPartial={onPartial} onReceiptPdf={onReceiptPdf} onExportSale={onExportSale}/>)}
                 </div>
               </motion.div>
             )
@@ -5034,7 +5069,7 @@ function VentasClientes({ ventas = [], payments = [], loans = [], loading = fals
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES VENTAS — grid de tarjetas de clientes de ventas
 ═══════════════════════════════════════════════════════════════ */
-function ClientesVentas({ ventas = [], payments = [], loans = [], loading = false, go, onPay, onPartial, onArchive, onExportClient, onExportSale }) {
+function ClientesVentas({ ventas = [], payments = [], loans = [], receipts = [], loading = false, go, onPay, onPartial, onReceiptPdf, onArchive, onExportClient, onExportSale }) {
   const [q,        setQ]      = useState('')
   const [selected, setSelected] = useState(null)
 
@@ -5102,7 +5137,7 @@ function ClientesVentas({ ventas = [], payments = [], loans = [], loading = fals
         <div className="pn-panel" style={{padding:0,overflow:'hidden'}}>
           <div className="pn-panel-header"><span className="pn-panel-title"><ShoppingCart size={14}/> Compras a crédito</span></div>
           <div style={{padding:'8px 14px 14px'}}>
-            {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} loans={loans} onPay={onPay} onPartial={onPartial} onExportSale={onExportSale}/>)}
+            {c.ventas.map(v => <VentaAcordeon key={v.id} venta={v} cuotas={cuotasVenta} loans={loans} receipts={receipts} onPay={onPay} onPartial={onPartial} onReceiptPdf={onReceiptPdf} onExportSale={onExportSale}/>)}
           </div>
         </div>
       </div>
@@ -5620,7 +5655,7 @@ function LegalDialog({ section = 'terms', onClose }) {
 /* ═══════════════════════════════════════════════════════════════
    CLIENTES PRESTAMOS
 ═══════════════════════════════════════════════════════════════ */
-function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onAdjustLoan, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, onPromise, payments = [], receipts = [], promises = [] }) {
+function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, onEdit, onAdjustLoan, onArchivar, onComprobanteDocx, onExportClient, onPay, onPartial, onPromise, onReceiptPdf, payments = [], receipts = [], promises = [] }) {
   const [q,        setQ]   = useState('')
   const [selected, setSel] = useState(null)
   const [expandedInstallment, setExpandedInstallment] = useState(null)
@@ -5764,6 +5799,7 @@ function ClientesPrestamos({ loans = [], allLoans = [], loading = false, onNew, 
                           <div className="pn-payment-history-row" key={r.dbId || r.id}>
                             <span><b>Cuota {r.n ?? '—'}</b><small>{r.paidAt ? new Date(r.paidAt).toLocaleString('es-AR', { dateStyle:'short', timeStyle:'short' }) : 'Fecha sin dato'} · {r.method || 'Efectivo'} · {r.id}</small></span>
                             <strong className="text-green"><Money value={r.amount}/></strong>
+                            <button type="button" className="pn-btn-outline pn-btn-sm" onClick={() => onReceiptPdf?.(r)}><FileText size={12}/> PDF</button>
                           </div>
                         ))}
                       </div>

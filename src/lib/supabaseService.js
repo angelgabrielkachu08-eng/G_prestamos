@@ -254,6 +254,30 @@ export async function cargarCarteraCompleta(userId) {
     }
   })
 
+  // Calcular saldos históricos posteriores a cada pago para que un PDF
+  // descargado meses después refleje el estado que quedó al cobrar.
+  const remainingQuotaByPayment = new Map()
+  const paidByQuota = new Map()
+  for (const p of [...receiptResult.data].sort((a, b) => String(a.recibido_at).localeCompare(String(b.recibido_at)))) {
+    const quota = Array.isArray(p.cuota) ? p.cuota[0] : p.cuota
+    const alreadyPaid = paidByQuota.get(p.cuota_id) ?? 0
+    const remaining = Math.max(0, Number(quota?.monto || 0) - alreadyPaid - Number(p.monto || 0))
+    remainingQuotaByPayment.set(p.id, remaining)
+    paidByQuota.set(p.cuota_id, alreadyPaid + Number(p.monto || 0))
+  }
+  const originalByLoan = new Map()
+  for (const q of quotaResult.data) originalByLoan.set(q.prestamo_id, (originalByLoan.get(q.prestamo_id) ?? 0) + Number(q.monto || 0))
+  const loanPaid = new Map()
+  const remainingCreditByPayment = new Map()
+  for (const p of [...receiptResult.data].sort((a, b) => String(a.recibido_at).localeCompare(String(b.recibido_at)))) {
+    const quota = Array.isArray(p.cuota) ? p.cuota[0] : p.cuota
+    const loanId = quota?.prestamo_id
+    if (!loanId) continue
+    const paid = (loanPaid.get(loanId) ?? 0) + Number(p.monto || 0)
+    loanPaid.set(loanId, paid)
+    remainingCreditByPayment.set(p.id, Math.max(0, (originalByLoan.get(loanId) ?? 0) - paid))
+  }
+
   // Transformar pagos como recibos
   const receipts = receiptResult.data.flatMap((p) => {
     const loanRaw = p.cuota?.prestamo
@@ -271,12 +295,15 @@ export async function cargarCarteraCompleta(userId) {
       amount: Number(p.monto),
       capital: Number(p.capital),
       interest: Number(p.interes),
-      due: p.recibido_at,
+      due: p.cuota?.fecha_vencimiento,
       paidAt: p.recibido_at,
       status: 'Pagado',
       n: p.cuota?.numero,
       method: p.metodo,
       origen: loan?.origen ?? 'efectivo',
+      originalAmount: Number(p.cuota?.monto || 0),
+      remainingQuota: remainingQuotaByPayment.get(p.id) ?? 0,
+      remainingCredit: remainingCreditByPayment.get(p.id) ?? 0,
     }]
   })
 

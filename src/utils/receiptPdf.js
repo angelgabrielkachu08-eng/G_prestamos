@@ -286,3 +286,63 @@ export async function exportReceiptPdf(payment) {
   /* ── Guardar ── */
   doc.save(`prestaneo-recibo-${payment.id ?? Date.now()}.pdf`)
 }
+
+/** Comprobante compacto tipo ticket, listo para imprimir en papel común o térmico. */
+export function exportInstallmentReceiptPdf(payment) {
+  const width = 80
+  const items = Array.isArray(payment.items) ? payment.items : []
+  const itemLines = items.reduce((sum, item) => sum + Math.max(1, Math.ceil(String(item.nombre ?? item.name ?? 'Producto').length / 30)), 0)
+  const height = Math.max(112, 108 + itemLines * 4)
+  const doc = new jsPDF({ unit: 'mm', format: [width, height], orientation: 'portrait' })
+  const pad = 6
+  let y = 9
+  const line = (label, value, opts = {}) => {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(105, 110, 120)
+    doc.text(label, pad, y)
+    doc.setFont('helvetica', opts.bold ? 'bold' : 'normal'); doc.setFontSize(opts.size || 8); doc.setTextColor(...(opts.color || [35, 38, 45]))
+    const wrapped = doc.splitTextToSize(String(value ?? '—'), width - pad * 2 - 24)
+    doc.text(wrapped, width - pad, y, { align: 'right' })
+    y += Math.max(5, wrapped.length * 3.6)
+  }
+  const separator = () => { doc.setDrawColor(210, 213, 220); doc.setLineWidth(.25); doc.line(pad, y, width-pad, y); y += 5 }
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(28, 31, 39)
+  doc.text('PRESTANEO', width / 2, y, { align: 'center' }); y += 5
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(94, 99, 108)
+  doc.text('COMPROBANTE DE PAGO', width / 2, y, { align: 'center' }); y += 5
+  doc.setFontSize(7); doc.text(`N° ${payment.id ?? '—'}`, width / 2, y, { align: 'center' }); y += 4
+  separator()
+
+  line('Cliente', payment.client, { bold: true })
+  line(payment.origen === 'venta' ? 'Compra' : 'Préstamo', payment.saleReference || payment.loanId)
+  if (payment.n != null) line('Cuota', `${payment.n}${payment.totalQuotas ? ` de ${payment.totalQuotas}` : ''}`)
+  if (payment.due) line('Vencimiento', new Date(`${String(payment.due).slice(0, 10)}T12:00:00`).toLocaleDateString('es-AR'))
+  line('Fecha de pago', dateText(payment.paidAt || new Date()))
+
+  if (payment.origen === 'venta') {
+    separator()
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(35, 38, 45)
+    doc.text('PRODUCTOS', pad, y); y += 4
+    for (const item of items) {
+      const name = String(item.nombre ?? item.name ?? 'Producto')
+      const qty = Number(item.cantidad ?? item.qty ?? 1)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(55, 59, 67)
+      const wrapped = doc.splitTextToSize(`${qty}x ${name}`, width - pad * 2)
+      doc.text(wrapped, pad, y); y += wrapped.length * 3.4
+    }
+  }
+
+  separator()
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(105, 110, 120)
+  doc.text('IMPORTE RECIBIDO', pad, y); y += 6
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(17); doc.setTextColor(20, 150, 91)
+  doc.text(money(payment.amount), width / 2, y, { align: 'center' }); y += 7
+  line('Resta de esta cuota', money(payment.remainingQuota ?? 0), { bold: true })
+  line('Deuda pendiente', money(payment.remainingCredit ?? 0), { bold: true })
+  y += 2; separator()
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110, 114, 122)
+  doc.text('Conserve este comprobante.', width / 2, y, { align: 'center' })
+
+  const safeId = String(payment.id ?? Date.now()).replace(/[^a-z0-9_-]/gi, '-')
+  doc.save(`comprobante-cuota-${safeId}.pdf`)
+}
